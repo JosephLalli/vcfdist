@@ -1,5 +1,5 @@
 TARGET = vcfdist
-INSTALLDIR = /usr/local/bin
+INSTALLDIR = /home/lalli/usr/local/bin
 OBJS = globals.o print.o variant.o dist.o bed.o cluster.o phase.o edit.o timer.o
 
 CXX ?= g++
