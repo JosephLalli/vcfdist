@@ -4,8 +4,8 @@ OBJS = globals.o print.o variant.o dist.o bed.o cluster.o phase.o edit.o timer.o
 
 CXX ?= g++
 CXXFLAGS ?= -O3
-CXXFLAGS += -Wall -Wextra -std=c++17
-LDFLAGS += -lz -lhts -lpthread -lm -lstdc++
+CXXFLAGS += -Wall -Wextra -std=c++17 -fopenmp
+LDFLAGS += -lz -lhts -lpthread -lm -lstdc++ -fopenmp
 
 all: $(TARGET)
 

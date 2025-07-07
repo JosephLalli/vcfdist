@@ -6,6 +6,7 @@
 #include <utility>
 #include <queue>
 #include <thread>
+#include <omp.h>
 
 #include "dist.h"
 #include "edit.h"
@@ -1735,6 +1736,9 @@ void precision_recall_wrapper(
 
     if (stop == start) return;
 
+    // Use OpenMP to parallelize supercluster processing within each thread
+    // This provides better load balancing for variable-sized superclusters
+    #pragma omp parallel for schedule(dynamic) if((stop - start) > 1)
     for (int idx = start; idx < stop; idx++) {
         std::string ctg = clusterdata_ptr->contigs[
             sc_groups[thread_step][CTG_IDX][idx]];
@@ -1846,23 +1850,19 @@ void precision_recall_wrapper(
         for (int i = 0; i < CALLSETS*HAPS; i++)
             swap_pred_maps.push_back(std::shared_ptr< std::unordered_map<idx1, idx1> >(new std::unordered_map<idx1, idx1>()));
 
-        // if memory-limited and each subproblem is large, 
-        // spawn a new thread for each of the 4 alignments
+        // Use OpenMP for better parallelization of the 4 alignments
+        // This allows better scaling beyond 4 threads and reduces overhead
         if (thread4) {
-            std::vector<std::thread> threads;
+            #pragma omp parallel for schedule(dynamic) num_threads(4)
             for (int ti = 0; ti < CALLSETS*HAPS; ti++) {
-                threads.push_back(std::thread( calc_prec_recall_aln,
-                    std::cref(query1), std::cref(query2), 
-                    std::cref(truth1), std::cref(truth2), std::cref(ref_q1),
-                    std::cref(query1_ref_ptrs), std::cref(ref_query1_ptrs), 
-                    std::cref(query2_ref_ptrs), std::cref(ref_query2_ptrs),
-                    std::cref(truth1_ref_ptrs), std::cref(truth2_ref_ptrs),
-                    std::ref(aln_score), std::ref(aln_ptrs), 
-                    std::ref(swap_pred_maps), std::ref(aln_query_ref_end), 
-                    ti, ti+1, false));
+                calc_prec_recall_aln(
+                    query1, query2, truth1, truth2, ref_q1,
+                    query1_ref_ptrs, ref_query1_ptrs, 
+                    query2_ref_ptrs, ref_query2_ptrs,
+                    truth1_ref_ptrs, truth2_ref_ptrs,
+                    aln_score, aln_ptrs, swap_pred_maps,
+                    aln_query_ref_end, ti, ti+1, false);
             }
-            for (std::thread & t : threads)
-                t.join();
         } else { // calculate 4 alignments in this thread
             calc_prec_recall_aln(
                     query1, query2, truth1, truth2, ref_q1,
