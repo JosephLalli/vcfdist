@@ -519,14 +519,17 @@ variantData::variantData(std::string vcf_fn,
         }
     }
 
+    // Determine which sample to use and find its index
+    int sample_idx = 0;
     if (bcf_hdr_nsamples(hdr) != 1) {
+        // Multi-sample VCF
         if (g.sample_name.empty()) {
             ERROR("Multi-sample VCF provided (%d samples in %s VCF '%s'). "
                   "Please specify which sample to run on using -s or --sample option",
                   bcf_hdr_nsamples(hdr), callset_strs[callset].data(), vcf_fn.data());
         }
         // Find the sample index
-        int sample_idx = -1;
+        sample_idx = -1;
         for (int i = 0; i < bcf_hdr_nsamples(hdr); i++) {
             if (std::string(hdr->samples[i]) == g.sample_name) {
                 sample_idx = i;
@@ -549,17 +552,7 @@ variantData::variantData(std::string vcf_fn,
             }
         }
         this->sample = hdr->samples[0];
-    }
-    
-    // Store sample index for multi-sample VCF support
-    int sample_idx = 0;
-    if (bcf_hdr_nsamples(hdr) > 1) {
-        for (int i = 0; i < bcf_hdr_nsamples(hdr); i++) {
-            if (std::string(hdr->samples[i]) == this->sample) {
-                sample_idx = i;
-                break;
-            }
-        }
+        sample_idx = 0;
     }
 
     // verify that the filters we selected were in the VCF
@@ -680,16 +673,19 @@ variantData::variantData(std::string vcf_fn,
             ERROR("Failed to read %s GT at %s:%lld", 
                     callset_strs[callset].data(), ctg.data(), (long long)rec->pos);
         } else if (ngt > 0) {
-            // For multi-sample VCFs, ngt is values per sample, total is ngt * nsamples
-            // Adjust ngt to be per-sample ploidy and offset gt pointer to our sample
-            int ploidy_per_sample = ngt / bcf_hdr_nsamples(hdr);
+            // For multi-sample VCFs, ngt is total values (ploidy * nsamples)
+            // Calculate per-sample ploidy and extract data for our sample
+            int nsamples = bcf_hdr_nsamples(hdr);
+            if (ngt % nsamples != 0) {
+                ERROR("Invalid GT field at %s:%lld in %s VCF (values=%d not divisible by samples=%d)",
+                      ctg.data(), (long long)rec->pos, callset_strs[callset].data(), ngt, nsamples);
+            }
+            int ploidy_per_sample = ngt / nsamples;
             int *sample_gt = gt + (sample_idx * ploidy_per_sample);
             ngt = ploidy_per_sample;
             // Copy to beginning of array for compatibility with existing code
-            if (sample_idx > 0 && ploidy_per_sample <= GT_memsize) {
-                for (int i = 0; i < ploidy_per_sample; i++) {
-                    gt[i] = sample_gt[i];
-                }
+            for (int i = 0; i < ploidy_per_sample; i++) {
+                gt[i] = sample_gt[i];
             }
         }
 
