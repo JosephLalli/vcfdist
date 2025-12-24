@@ -138,6 +138,18 @@ void Globals::parse_args(int argc, char ** argv) {
                 ERROR("%s", e.what());
             }
 /*******************************************************************************/
+        } else if (std::string(argv[i]) == "-s" || 
+                std::string(argv[i]) == "--sample") {
+            i++;
+            if (i == argc) {
+                ERROR("Option '-s' used without providing sample name");
+            }
+            try {
+                this->sample_name = std::string(argv[i++]);
+            } catch (const std::exception & e) {
+                ERROR("Invalid sample name provided");
+            }
+/*******************************************************************************/
         } else if (std::string(argv[i]) == "-f" || 
                 std::string(argv[i]) == "--filter") {
             i++;
@@ -519,6 +531,8 @@ void Globals::print_usage() const
     printf("\n  Inputs/Outputs:\n");
     printf("  -b, --bed <STRING>\n");
     printf("      BED file containing regions to evaluate\n");
+    printf("  -s, --sample <STRING>\n");
+    printf("      sample name to use from multi-sample VCF files\n");
     printf("  -v, --verbosity <INTEGER> [%d]\n", g.verbosity);
     printf("      printing verbosity (0: succinct, 1: default, 2:verbose)\n");
     printf("  -p, --prefix <STRING> [./]\n");

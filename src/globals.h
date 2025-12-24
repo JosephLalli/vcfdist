@@ -16,6 +16,7 @@ public:
     std::string query_vcf_fn;
     std::string truth_vcf_fn;
     std::string bed_fn;
+    std::string sample_name;
     bedData bed;
     bool bed_exists = false;
     bool write = true;
