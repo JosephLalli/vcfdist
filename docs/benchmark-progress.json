@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "last_updated": "2026-05-26",
+  "baseline": {
+    "tag": "v2.6.4",
+    "docker_image": "timd1/vcfdist:v2.6.4",
+    "status": "baseline measurements not yet recorded"
+  },
+  "goals": {
+    "primary_metric": "scaling_efficiency",
+    "secondary_metric": "wall_clock_speedup",
+    "near_term_thread_target": 64,
+    "stretch_thread_target": 256,
+    "eventual_speedup_target": 2.0,
+    "max_per_core_memory_increase_ratio": 1.3,
+    "correctness_requirement": "no output, genotyping-error, or switch-error regression"
+  },
+  "canonical_benchmark": {
+    "name": "hg03784_chr21_grch38",
+    "execution_environment": "docker",
+    "inputs": {
+      "query": "fixtures/hg03784_chr21_grch38/query.vcf.gz",
+      "truth": "fixtures/hg03784_chr21_grch38/truth.bcf",
+      "reference": "fixtures/hg03784_chr21_grch38/reference.fa",
+      "regions": "fixtures/hg03784_chr21_grch38/region.bed"
+    },
+    "output_root": "test_unphased_gt_testing/results/vcfdist/",
+    "flags": [
+      "--credit-threshold 1",
+      "--max-supercluster-size 10000",
+      "--realign-query",
+      "--realign-truth",
+      "--cluster biwfa",
+      "-v 0"
+    ],
+    "preferred_thread_sweep": [1, 8, 16, 32, 64],
+    "stretch_thread_sweep": [128, 256]
+  },
+  "measurement_policy": {
+    "time_tool": "/usr/bin/time -v",
+    "wall_clock_field": "Elapsed (wall clock) time",
+    "memory_field": "Maximum resident set size",
+    "docker_is_canonical": true,
+    "native_runs_are_diagnostic_only": true,
+    "repeat_policy": "median of three preferred for short runs; repeat chr21 near-threshold results when runtime budget allows"
+  },
+  "baseline_runs": [],
+  "slice_results": [],
+  "open_measurement_gaps": [
+    "Record v2.6.4 Docker baseline for the chr21 fixture at 1, 8, 16, 32, and 64 threads.",
+    "Record host CPU, NUMA topology, Docker version, and storage notes for each benchmark host.",
+    "Identify the exact output files used to report genotyping error and switch error rates for tracker-level metric extraction.",
+    "Confirm whether the bundled chr21 fixture is large enough for 64-core scaling claims; if not, add a larger chr21 benchmark tier before making high-core claims."
+  ]
+}
