@@ -125,14 +125,14 @@ TYPE   THRESHOLD     TRUTH_TP  QUERY_TP  TRUTH_FN  QUERY_FP  PREC     RECALL   F
 SNP    NONE Q >= 0   8222      8222      1         2         0.9997   0.9998   0.9998    37.3885
 SNP    BEST Q >= 0   8222      8222      1         2         0.9997   0.9998   0.9998    37.3885
 
-INDEL  NONE Q >= 0   876       876       51        12        0.9864   0.9449   0.9652    14.5953
-INDEL  BEST Q >= 0   876       876       51        12        0.9864   0.9449   0.9652    14.5953
+INDEL  NONE Q >= 0   874       874       51        12        0.9865   0.9449   0.9652    14.5858
+INDEL  BEST Q >= 0   874       874       51        12        0.9865   0.9449   0.9652    14.5858
 
 SV     NONE Q >= 0   0         0         0         0         1.0000   1.0000   1.0000    100.000
 SV     BEST Q >= 0   0         0         0         0         1.0000   1.0000   1.0000    100.000
 
-ALL    NONE Q >= 0   9098      9098      52        14        0.9984   0.9943   0.9963    24.4200
-ALL    BEST Q >= 0   9098      9098      52        14        0.9984   0.9943   0.9963    24.4200
+ALL    NONE Q >= 0   9096      9096      52        14        0.9985   0.9943   0.9964    24.4191
+ALL    BEST Q >= 0   9096      9096      52        14        0.9985   0.9943   0.9964    24.4191
 ```
 
 To include more details on intermediate results, run it again at higher verbosity by removing the `-v 0` flag.

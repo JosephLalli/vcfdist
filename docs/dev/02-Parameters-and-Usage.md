@@ -89,6 +89,11 @@ This is a heuristic that compromises in terms of efficiency and accuracy, basica
 
 Maximum number of iterations for expanding/merging clusters, only applicable if `--cluster biwfa` is selected (which is the default).
 
+### -s, --max-supercluster-size
+*type: integer, default: 10000*
+
+The maximum size of a supercluster (group of variants that are evaluated together). A larger limit will result in higher RAM usage and a longer runtime, but may lead to a more accurate evaluation for a few edge cases.
+
 ## Re-Alignment:
 ### -rq, --realign-query
 *type: flag*
@@ -106,17 +111,17 @@ Realign truth variants using Smith-Waterman parameters -x -o -e
 Standardize truth and query variant representations, then exit.
 
 ### -x, --mismatch-penalty
-*type: integer, default: 3*
+*type: integer, default: 5*
 
 Smith-Waterman mismatch (substitution) penalty.
 
 ### -o, --gap-open-penalty
-*type: integer, default: 2*
+*type: integer, default: 6*
 
 Smith-Waterman gap opening penalty.
 
 ### -e, --gap-extend-penalty
-*type: integer, default: 1*
+*type: integer, default: 2*
 
 Smith-Waterman gap extension penalty.
 
@@ -125,6 +130,33 @@ Smith-Waterman gap extension penalty.
 *type: float, default: 0.70*
 
 Minimum partial credit (calculated as a fractional reduction in edit distance over if the variant is omitted) to consider a query variant a true positive. 
+
+## Phasing:
+### -pt, --phasing-threshold 
+*type: float, default: 0.60*
+
+Minimum fractional reduction in edit distance over other phasing in order to consider this supercluster phased. Phased superclusters are then used to calculate switch and flip errors.
+
+## Distance:
+### -d, --distance
+*type: flag*
+
+Flag to include alignment distance calculations, which are skipped by default.
+
+### -ex, --eval-mismatch-penalty
+*type: integer, default: 3*
+
+Mismatch penalty (`--distance` evaluation only).
+
+### -eo, --eval-gap-open-penalty
+*type: integer, default: 2*
+
+Gap opening penalty (`--distance` evaluation only).
+
+### -ee, --eval-gap-extend-penalty
+*type: integer, default: 1*
+
+Gap extension penalty (`--distance` evaluation only).
 
 ## Utilization:
 ### -t, --max-threads

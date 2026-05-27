@@ -80,6 +80,7 @@ High-level precision/recall overview of SNP/INDEL/SV performance. For each categ
 | Column | Type | Description |
 | ------ | ---- | ----------- |
 | VAR_TYPE | categorical | Variant type category. SNP for substitutions, INDEL for variants smaller than --sv-threshold, and SV for larger variants.  |
+| THRESHOLD | categorical | Threshold type for this line: the chosen minimum quality score or the quality score threshold that gives the best performance. |
 | MIN_QUAL | integer | Variants above this minimum quality score are used to calculate the performance metrics on this line. |
 | TRUTH_TP | integer | Total measured true positive truth variants in this variant category. |
 | QUERY_TP | integer | Total measured true positive query variants in this variant category. |
@@ -149,10 +150,11 @@ High-level alignment distance overview of SNP/INDEL performance. For each catego
 | Column | Type | Description |
 | ------ | ---- | ----------- |
 | VAR_TYPE | categorical | Variant category considered on this line (ALL/SNP/INS/DEL/INDEL). |
+| THRESHOLD | categorical | Threshold type for this line: minimum, best, or maximum quality score threshold. |
 | MIN_QUAL | integer | Minimum variant quality considered. |
-| EDIT_DISTANCE | integer | Total edit distance from truth sequence after query variants above MIN_QUAL are applied. |
+| EDIT_DIST | integer | Total edit distance from truth sequence after query variants above MIN_QUAL are applied. |
 | DISTINCT_EDITS | integer | Total number of edits from truth sequence after query variants above MIN_QUAL are applied. |
-| ED_QSCORE | float | PHRED-scaled measure of query sequence quality in terms of edit distance: -10*log10(EDIT_DISTANCE / ORIG_EDIT_DISTANCE), where ORIG_EDIT_DISTANCE is the query edit distance from the truth sequence when no query variants are applied. |
+| ED_QSCORE | float | PHRED-scaled measure of query sequence quality in terms of edit distance: -10*log10(EDIT_DIST / ORIG_EDIT_DIST), where ORIG_EDIT_DIST is the query edit distance from the truth sequence when no query variants are applied. |
 | DE_QSCORE | float | PHRED-scaled measure of query sequence quality in terms of distinct edits: -10*log10(DISTINCT_EDITS / TRUTH_TOTAL), where TRUTH_TOTAL is total number of truth variants. |
 | ALN_QSCORE | float | PHRED-scaled measure of query sequence quality in terms of alignment score: -10*log10(ALN_SCORE / ORIG_ALN_SCORE), where ORIG_ALN_SCORE is the query alignment score (to the truth sequence) when no query variants are applied. |
 

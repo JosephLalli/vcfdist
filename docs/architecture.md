@@ -14,7 +14,7 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 ### Entry point and configuration
 
-- `main.cpp` (268 lines) — `int main(argc, argv)`. Parses args via `g.parse_args`, sets up the timer set, reads the reference FASTA and the two VCFs into `variantData` instances, then drives the comparison pipeline: cluster → supercluster → precision/recall → phase → edit distance → write.
+- `main.cpp` (268 lines) — `int main(argc, argv)`. Parses args via `g.parse_args`, sets up the timer set, reads the reference FASTA and the two VCFs into `variantData` instances, then drives the comparison pipeline: cluster → supercluster → precision/recall → optional edit distance → phase → write.
 - `globals.h` / `globals.cpp` (655 lines) — declares `class Globals` and the program-wide instance `extern Globals g;` (defined in `main.cpp`). `Globals::parse_args` is ~491 of the 655 lines — `globals.cpp` is overwhelmingly CLI handling, not stateful logic. The actual configuration surface (`Globals` member fields) is one screen of defaults in `globals.h`.
 - `defs.h` — shared constants, type tags, and the `INFO`/`WARN`/`ERROR` logging macros used throughout the codebase.
 
@@ -23,7 +23,7 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 - `variant.h` / `variant.cpp` (1004 lines) — `ctgVariants` (per-contig, parallel arrays of variant fields) and `variantData` (top-level VCF holder: `variants[hap][ctg] -> shared_ptr<ctgVariants>`). The `variantData` constructor reads a VCF via HTSlib; `write_vcf` and `left_shift` are the other large methods.
 - `bed.h` / `bed.cpp` (288 lines) — `bedData` and `contigRegions`. Parses the optional `-b` BED and answers in/out-of-region queries.
 - `fasta.h` (header-only) — `fastaData`. Wraps an HTSlib FAI-indexed FASTA; held as `std::shared_ptr<fastaData>` and threaded through everything that needs reference sequence.
-- `cluster.h` / `cluster.cpp` (1263 lines) — `ctgSuperclusters` and `superclusterData`. Groups variants into clusters (per haplotype) and then into superclusters (cross-haplotype regions that must be evaluated together). The two main entry points are `cluster(...)` and the supercluster constructor; the rest is the BiWFA-driven realignment path selected by `--cluster biwfa`.
+- `cluster.h` / `cluster.cpp` (1263 lines) — `ctgSuperclusters` and `superclusterData`. Groups variants into clusters (per haplotype) and then into superclusters (cross-haplotype regions that must be evaluated together). The main clustering entry points are `simple_cluster(...)`, `wf_swg_cluster(...)`, and `superclusterData::supercluster(...)`; the rest is the BiWFA-driven realignment path selected by `--cluster biwfa`.
 - `phase.h` / `phase.cpp` (626 lines) — `ctgPhaseblocks`, `phaseblockData`, and the phase-block analysis that runs after precision/recall.
 - `edit.h` / `edit.cpp` (280 lines) — `editData` and the edit-distance summary across the comparison.
 
@@ -53,8 +53,8 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 2. **Cluster** — variants are clustered per haplotype, then superclustered across haplotypes (`cluster.cpp`).
 3. **Realign** (optional, gated by `--realign-query` / `--realign-truth`) — left-shifts and re-emits the input VCFs.
 4. **Precision / recall** — `precision_recall_threads_wrapper` in `dist.cpp` partitions superclusters across threads and computes TP/FP/FN with credit via BiWFA.
-5. **Phase analysis** — `phase.cpp` annotates phase blocks and switch/flip errors.
-6. **Edit distance** — `edits_wrapper` in `dist.cpp` summarizes edit distance across the comparison.
+5. **Edit distance** (optional, gated by `--distance`) — `edits_wrapper` in `dist.cpp` summarizes edit distance across the comparison and writes distance reports.
+6. **Phase analysis** — `phaseblockData` in `phase.cpp` annotates phase blocks and switch/flip errors.
 7. **Write** — `print.cpp` emits the report TSVs and (if applicable) the rewritten VCFs.
 
 The pipeline is single-process. Parallelism is per-supercluster inside step 4 only (see `dist.cpp::precision_recall_threads_wrapper`).
