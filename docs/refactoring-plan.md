@@ -23,7 +23,7 @@ The default path is C++ performance refactoring. Rust is on the table both as an
 
 No branch merges unless output correctness is unchanged against the authoritative demo regression baseline.
 
-Correctness diffs use the checked-in `demo/results/` baseline. Release baseline tag/image for performance comparisons: `v2.6.4` unless this document is updated. Development branches start from `master`.
+Correctness diffs use the checked-in `demo/results/` baseline. Development branches start from `master`.
 
 Required correctness checks:
 
@@ -37,16 +37,9 @@ CI runs the demo regression. The engineer running a slice should also run it loc
 
 Performance is a first-class gate, not a note at the end of a refactor.
 
-Canonical recorded performance measurement follows `testing.md` and `docs/benchmark-progress.json`. The current chr22 baseline uses the local `v2.6.4` binary timed directly by native `/usr/bin/time -v -o ... ./src/vcfdist ...` so wall-clock and RSS describe the `vcfdist` process. Do not record host `/usr/bin/time -v docker run ...` RSS; that measures the Docker client. A Docker run is acceptable only when the timing/RSS mechanism observes `vcfdist` inside the container or an approved design note documents an equivalent measurement.
+Canonical recorded performance measurement follows `testing.md` and `docs/benchmark-progress.json`. Baseline version, Docker-RSS caveat, timed-output validation requirement, and measurement command: see `testing.md § Baseline` and `testing.md § Timed-output validation`.
 
 The provisional performance smoke benchmark is the chr22 testset described in `testing.md`. Smaller tests may be used during development, but performance claims must be grounded in a documented performance tier. The current chr22 tier is useful for smoke timing and has baseline genotype, switch, and flip errors; high-core scaling claims require a larger non-pathological tier recorded in `docs/benchmark-progress.json` unless the design note explicitly classifies the slice as exploratory or enabling-only.
-
-A recorded performance result is incomplete unless the exact output tree produced
-by the timed `vcfdist` invocation is validated against the archived baseline
-output tree for the same fixture, command, and matching thread count when
-available. The validation runs after `/usr/bin/time` exits and is not part of
-the timed interval. Do not substitute the demo regression, an untimed rerun, or
-summary metrics for the timed-output diff.
 
 Each slice records results in the machine-readable tracker at `docs/benchmark-progress.json`.
 

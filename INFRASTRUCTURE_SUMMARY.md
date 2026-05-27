@@ -2,7 +2,7 @@
 
 One-page map of the documents that drive vcfdist performance refactor work. Read top-to-bottom on first encounter.
 
-- [`AGENTS.md`](AGENTS.md) — the four agent roles (Explorer, Oracle, Fixer, Librarian), the phase taxonomy, and the information flow. The orchestrator (Conductor) is the runtime; this file is the brief.
+- [`AGENTS.md`](AGENTS.md) — agent-facing entry point. Delegation map: [`docs/agents/index.md`](docs/agents/index.md). Detailed roles: [`docs/agents/`](docs/agents/).
 - [`docs/architecture.md`](docs/architecture.md) — snapshot of `src/` as it stands: modules, data flow, file sizes, known structural tensions. The Discovery phase starts here.
 - [`docs/refactoring-plan.md`](docs/refactoring-plan.md) — performance-first goals, non-goals, the **correctness and performance gates** that every slice must pass, and the per-slice workflow.
 - [`docs/coding-guidelines.md`](docs/coding-guidelines.md) — the conventions observed in `src/`. New code matches existing code.
@@ -14,4 +14,6 @@ One-page map of the documents that drive vcfdist performance refactor work. Read
 - [`demo/demo.sh`](demo/demo.sh) — the original chr1 5 Mb demo/plot script, useful for manual visual refreshes.
 - [`conductor/`](conductor/) — owned by the Conductor orchestrator; not edited from the repo side.
 
-If you're acting as a refactor engineer (or as the Fixer agent), the sequence is: read `AGENTS.md` → `docs/refactoring-plan.md` → `docs/benchmark-progress.json` → `testing.md` → `docs/architecture.md` → `docs/coding-guidelines.md` → start an approved slice branch.
+For agent-facing constraints and `oh-my-opencode-slim` delegation guidance, see [`AGENTS.md`](AGENTS.md) and [`docs/agents/index.md`](docs/agents/index.md).
+
+If you're acting as a refactor engineer (or as the `fixer` agent), the sequence is: read `AGENTS.md` → `docs/refactoring-plan.md` → `docs/benchmark-progress.json` → `testing.md` → `docs/architecture.md` → `docs/coding-guidelines.md` → start an approved slice branch.

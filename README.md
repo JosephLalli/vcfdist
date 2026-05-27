@@ -49,18 +49,20 @@ Please cite the following works if you use vcfdist:
 
 <details>
 <summary>
-<a href="https://doi.org/10.1101/2024.01.23.575922" target="_blank"><b>[bioRxiv]</b> Jointly benchmarking small and structural variant calls with vcfdist</a>
+<a href="https://doi.org/10.1186/s13059-024-03394-5" target="_blank"><b>[Genome Biology]</b> Jointly benchmarking small and structural variant calls with vcfdist</a>
 </summary>
 
 <pre>
-@article{dunn2024vcfdist,
+@article{dunn2024jointly,
   author={Dunn, Tim and Zook, Justin M and Holt, James M and Narayanasamy, Satish},
   title={Jointly benchmarking small and structural variant calls with vcfdist},
-  journal={bioRxiv},
+  journal={Genome Biology},
   year={2024},
-  publisher={Cold Spring Harbor Laboratory},
-  doi={10.1101/2024.01.23.575922},
-  URL={https://doi.org/10.1101/2024.01.23.575922}
+  volume={25},
+  number={1},
+  pages={253},
+  doi={10.1186/s13059-024-03394-5},
+  URL={https://doi.org/10.1186/s13059-024-03394-5}
 }
 </pre>
 </details>

@@ -32,17 +32,11 @@ Inputs:
 - Reference FASTA: `/mnt/ssd/lalli/phasing_T2T/GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta` (must be available at this path)
 - `fixtures/HG00733_chr22_32000000_37000000_phaseflip/region.bed`
 
-Authoritative baseline for performance comparisons: `v2.6.4`, currently recorded with the local `./src/vcfdist` binary timed directly by native `/usr/bin/time -v`. Docker image `timd1/vcfdist:v2.6.4` is retained for release provenance, but host `/usr/bin/time -v docker run ...` RSS is not a valid `vcfdist` RSS measurement.
-
-Recorded performance results must pair the `/usr/bin/time -v` wall-clock/RSS
-values with validation of the exact output tree produced by that timed run. The
-validation runs after timing and compares against the archived baseline output
-tree; demo regression alone is not a substitute for this same-run benchmark
-output-diff verdict.
+Baseline version, Docker-RSS caveat, and timed-output validation requirement: see `testing.md § Baseline` and `testing.md § Timed-output validation`.
 
 ## Key source-of-truth documents
 
-- `AGENTS.md` — phase taxonomy, agent roles, and information flow.
+- `AGENTS.md` — agent-facing entry point. Phase taxonomy and delegation map: `docs/agents/index.md`. Detailed roles: `docs/agents/`.
 - `docs/refactoring-plan.md` — goals, non-goals, gates, workflow, and acceptance rules.
 - `docs/benchmark-progress.json` — live benchmark tracker and measurement gaps.
 - `testing.md` — demo correctness gate, chr22 performance command, and benchmark protocol.

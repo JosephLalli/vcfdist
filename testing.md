@@ -64,6 +64,73 @@ Origin:
 - Truth source: `truth.hprc.bcf` (HPRC v2.0)
 - Query source: `query.1kgp.phaseflip.bcf` (1KGP with controlled phase flips)
 
+## VCF/BCF inspection
+
+`bcftools` is available in the benchmark environment. Use `bcftools view` for read-only inspection (headers, samples, contigs, region counts). `vcfdist` evaluates one sample at a time, so multi-sample panels must be inspected for sample names and then subset to one sample before they are used as benchmark inputs:
+
+```bash
+bcftools view -h input.bcf
+bcftools query -l input.bcf
+bcftools view -H -r chr22 input.bcf | wc -l
+```
+
+Do not run commands that write to or rewrite fixture files (`-o`, `index`, `norm`, `sort`, `reheader`, etc.). New artifacts must land under the repository artifact tree, never overwrite checked-in inputs.
+
+## Full-chr22 stress candidate
+
+For a larger benchmark tier that stresses the supercluster/precision-recall path
+more than the bundled 5 Mb smoke fixture, use sample `HG00733` on full `chr22` in
+the local CHM13 dataset under `/mnt/ssd/lalli/phasing_T2T`. The source panels are
+multi-sample, so create single-sample benchmark inputs under ignored `out/`
+before invoking `vcfdist`.
+
+Source inputs:
+
+- Query panel: `/mnt/ssd/lalli/phasing_T2T/testing_phasing_params2/phased_CHM13v2.0_panel_true_false_0.05_false_1_CHM13v2.0/1KGP.CHM13v2.0.chr22.recalibrated.snp_indel.pass.phased.native_maps.3202.bcf`
+- Truth panel: `/mnt/ssd/lalli/phasing_T2T/hprc.hgsvc.chr22.norm.0.05missingcutoff.annotated.sorted.atomized.no_svs.bcf`
+- Reference FASTA: `/mnt/ssd/lalli/phasing_T2T/chm13v2.0_maskedY_rCRS.uppercase.fasta`
+- Reference index: `/mnt/ssd/lalli/phasing_T2T/chm13v2.0_maskedY_rCRS.uppercase.fasta.fai`
+- Full-chr22 BED interval: `chr22 0 51324926`
+
+Prepare repo-local single-sample inputs:
+
+```bash
+mkdir -p out/opencode-runtime/full_chr22_chm13_hg00733/inputs
+python3 - <<'PY'
+from pathlib import Path
+base = Path('out/opencode-runtime/full_chr22_chm13_hg00733/inputs')
+(base / 'chr22.full.bed').write_text('chr22\t0\t51324926\n')
+PY
+
+bcftools view --threads 4 -r chr22 -s HG00733 -c 1:nref -a -Ob \
+    -o out/opencode-runtime/full_chr22_chm13_hg00733/inputs/query.1kgp.HG00733.chr22.bcf \
+    /mnt/ssd/lalli/phasing_T2T/testing_phasing_params2/phased_CHM13v2.0_panel_true_false_0.05_false_1_CHM13v2.0/1KGP.CHM13v2.0.chr22.recalibrated.snp_indel.pass.phased.native_maps.3202.bcf
+bcftools index -f out/opencode-runtime/full_chr22_chm13_hg00733/inputs/query.1kgp.HG00733.chr22.bcf
+
+bcftools view --threads 4 -r chr22 -s HG00733 -c 1:nref -a -Ob \
+    -o out/opencode-runtime/full_chr22_chm13_hg00733/inputs/truth.hprc.HG00733.chr22.bcf \
+    /mnt/ssd/lalli/phasing_T2T/hprc.hgsvc.chr22.norm.0.05missingcutoff.annotated.sorted.atomized.no_svs.bcf
+bcftools index -f out/opencode-runtime/full_chr22_chm13_hg00733/inputs/truth.hprc.HG00733.chr22.bcf
+
+bcftools reheader -f /mnt/ssd/lalli/phasing_T2T/chm13v2.0_maskedY_rCRS.uppercase.fasta.fai \
+    -o out/opencode-runtime/full_chr22_chm13_hg00733/inputs/query.1kgp.HG00733.chr22.reheader.bcf \
+    out/opencode-runtime/full_chr22_chm13_hg00733/inputs/query.1kgp.HG00733.chr22.bcf
+bcftools index -f out/opencode-runtime/full_chr22_chm13_hg00733/inputs/query.1kgp.HG00733.chr22.reheader.bcf
+
+bcftools reheader -f /mnt/ssd/lalli/phasing_T2T/chm13v2.0_maskedY_rCRS.uppercase.fasta.fai \
+    -o out/opencode-runtime/full_chr22_chm13_hg00733/inputs/truth.hprc.HG00733.chr22.reheader.bcf \
+    out/opencode-runtime/full_chr22_chm13_hg00733/inputs/truth.hprc.HG00733.chr22.bcf
+bcftools index -f out/opencode-runtime/full_chr22_chm13_hg00733/inputs/truth.hprc.HG00733.chr22.reheader.bcf
+```
+
+The `reheader` step is required because the phased query panel's `chr22` contig
+header does not include a `length`; `vcfdist` requires contig lengths in the VCF
+header. A 64-thread smoke run of this prepared dataset completed in `0:08.18`
+with peak RSS `1,270,620 KB`, `34,501` superclusters, ALL/NONE `59,426` truth TP,
+`59,428` query TP, `22,781` FN, `5,748` FP, `2` switch errors, and `8` flip
+errors. This is useful for development smoke testing, but it is still short;
+record a baseline thread sweep before using it for final scaling claims.
+
 ## Baseline
 
 Authoritative performance baseline version: `v2.6.4`.

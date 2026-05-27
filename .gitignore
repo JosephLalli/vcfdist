@@ -30,3 +30,16 @@ out/
 # don't track test cases
 test/
 issues/
+
+# Per-harness duplicate instruction files; AGENTS.md is canonical here and
+# CLAUDE.md is a committed pointer to it (do not gitignore CLAUDE.md).
+COPILOT_INSTRUCTIONS.md
+GEMINI.md
+GEMINI_INSTRUCTIONS.md
+.cursorrules
+.windsurfrules
+
+# Alternative agent-doc conventions not used in this repo.
+SKILL.md
+RULES.md
+CONTEXT.md
