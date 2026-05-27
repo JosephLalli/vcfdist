@@ -13,31 +13,39 @@ Primary goals:
 - Reduce wall-clock runtime in high-core environments.
 - Improve scaling efficiency, with 64-core utilization as the near-term target.
 - Treat 128/256-core NUMA scaling as a stretch target.
-- Preserve output files, comparison semantics, genotyping error rates, and switch error rates unless a separate approved feature proposal changes them.
+- Preserve output files, comparison semantics, genotyping error rates, switch error rates, and flip error rates unless a separate approved feature proposal changes them.
 - Keep per-core memory growth bounded; branch peak RSS at a matching thread count should remain below `1.3x` baseline peak RSS unless explicitly approved.
 - Use performance evidence, not file size alone, to select refactor slices.
 
-Long-term success is better high-core scaling, an eventual 2x wall-clock speedup on the canonical chr21 benchmark, unchanged correctness metrics, and a benchmark tracker that can guide the next slice from evidence.
+Long-term success is better high-core scaling, an eventual 2x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count, unchanged correctness metrics, and a benchmark tracker that can guide the next slice from evidence.
 
-## Canonical correctness and benchmark fixture
+## Correctness gate and performance fixture
 
-The canonical fixture is `fixtures/hg03784_chr21_grch38/`, derived from HPRC sample `HG03784` on `chr21` / `GRCh38`. It exercises the phased-comparison path.
+The canonical correctness gate is `bash demo/regression.sh`, which runs the bundled chr1 5 Mb demo and compares output against `demo/results/`. This is the first regression gate because it includes superclusters plus nonzero genotype, switch, and flip errors.
+
+The bundled performance smoke fixture is `fixtures/HG00733_chr22_32000000_37000000_phaseflip/`, derived from HPRC sample `HG00733` on `chr22` / `GRCh38`. It exercises the phased-comparison path with baseline genotype, switch, and flip errors but is not the correctness gate.
 
 Inputs:
 
-- `fixtures/hg03784_chr21_grch38/query.vcf.gz`
-- `fixtures/hg03784_chr21_grch38/truth.bcf`
-- `fixtures/hg03784_chr21_grch38/reference.fa`
-- `fixtures/hg03784_chr21_grch38/region.bed`
+- `fixtures/HG00733_chr22_32000000_37000000_phaseflip/query.1kgp.phaseflip.bcf`
+- `fixtures/HG00733_chr22_32000000_37000000_phaseflip/truth.hprc.bcf`
+- Reference FASTA: `/mnt/ssd/lalli/phasing_T2T/GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta` (must be available at this path)
+- `fixtures/HG00733_chr22_32000000_37000000_phaseflip/region.bed`
 
-Authoritative baseline for correctness diffs and performance comparisons: `v2.6.4` / Docker image `timd1/vcfdist:v2.6.4`.
+Authoritative baseline for performance comparisons: `v2.6.4`, currently recorded with the local `./src/vcfdist` binary timed directly by native `/usr/bin/time -v`. Docker image `timd1/vcfdist:v2.6.4` is retained for release provenance, but host `/usr/bin/time -v docker run ...` RSS is not a valid `vcfdist` RSS measurement.
+
+Recorded performance results must pair the `/usr/bin/time -v` wall-clock/RSS
+values with validation of the exact output tree produced by that timed run. The
+validation runs after timing and compares against the archived baseline output
+tree; demo regression alone is not a substitute for this same-run benchmark
+output-diff verdict.
 
 ## Key source-of-truth documents
 
 - `AGENTS.md` — phase taxonomy, agent roles, and information flow.
 - `docs/refactoring-plan.md` — goals, non-goals, gates, workflow, and acceptance rules.
 - `docs/benchmark-progress.json` — live benchmark tracker and measurement gaps.
-- `testing.md` — canonical fixture, Docker command, and benchmark protocol.
+- `testing.md` — demo correctness gate, chr22 performance command, and benchmark protocol.
 - `docs/architecture.md` — current source map, data flow, hotspots, and structural tensions.
 - `docs/coding-guidelines.md` — conventions that refactor work must preserve.
 - `docs/multiagent-process.md` — Conductor/orchestrator-facing process notes.

@@ -38,12 +38,12 @@ Known large or structurally important files: `dist.cpp`, `cluster.cpp`, `variant
 
 ## Execution and benchmarking environment
 
-- Canonical benchmark environment: Docker.
-- Baseline image: `timd1/vcfdist:v2.6.4`.
-- Native runs are useful for diagnosis but are not recorded as canonical benchmark results unless a design note explicitly says otherwise.
-- Timing tool: `/usr/bin/time -v`.
-- Required recorded metrics: wall-clock runtime, maximum resident set size, thread count, image/tag or digest, host CPU/NUMA notes, baseline and branch commit/tag, and output-diff verdict.
-- Preferred thread sweep on capable hosts: `1, 8, 16, 32, 64`.
+- Canonical benchmark environment: the environment recorded in `docs/benchmark-progress.json`; current chr22 baseline is native direct timing of `./src/vcfdist`.
+- Baseline release image for provenance: `timd1/vcfdist:v2.6.4`.
+- Docker runs are not canonical unless `vcfdist` itself is timed inside the container or an approved design note documents equivalent process RSS capture. Host `/usr/bin/time -v docker run ...` RSS measures the Docker client.
+- Timing tool: `/usr/bin/time -v`, preferably with `-o` to keep raw timing output.
+- Required recorded metrics: wall-clock runtime, maximum resident set size, thread count, execution environment and binary/image identifier, host CPU/NUMA notes, baseline and branch commit/tag, baseline/measured output artifact directories, validation command/log, and output-diff verdict for the exact timed output tree.
+- Preferred thread sweep on capable hosts: `1, 2, 8, 16, 32, 64`.
 - Optional NUMA stretch sweep: `128, 256`.
 
 ## Coding and performance constraints

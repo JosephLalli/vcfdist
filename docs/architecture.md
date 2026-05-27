@@ -6,7 +6,7 @@ A snapshot of the codebase as it stands. This document records what is, not what
 
 vcfdist compares a query VCF against a truth VCF, evaluates precision/recall and phasing accuracy, and writes per-variant annotations plus summary reports. Input is one query VCF, one truth VCF, a reference FASTA, and optionally a BED of evaluation regions. Output is a directory of TSV/VCF reports controlled by `-p`/`--prefix`.
 
-Correctness fixture, benchmark protocol, and Docker invocation: see `testing.md` and `demo/demo.sh`.
+Correctness fixture, benchmark protocol, direct `/usr/bin/time -v` invocation, and same-run benchmark output validation requirement: see `testing.md` and `demo/demo.sh`.
 
 ## Module map
 

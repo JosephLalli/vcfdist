@@ -43,7 +43,7 @@ Each commit should compile clean under `-Wall -Wextra`; small commits beat large
 
 ### Librarian — Verification
 
-Enforces the gates from `docs/refactoring-plan.md` and `testing.md`. Produces a pass/fail verdict covering output-diff status, genotyping/switch error status, wall-clock comparison, peak RSS comparison, and tracker consistency.
+Enforces the gates from `docs/refactoring-plan.md` and `testing.md`. Produces a pass/fail verdict covering the output-diff status of the exact timed benchmark output tree, genotyping/switch/flip error status, wall-clock comparison, peak RSS comparison, and tracker consistency.
 
 The gates are not negotiable per slice. If a gate is wrong, update the governing docs separately.
 
@@ -51,12 +51,12 @@ The gates are not negotiable per slice. If a gate is wrong, update the governing
 
 1. Branch from `master` using the appropriate prefix.
 2. Classify the slice before implementation.
-3. Capture baseline correctness and benchmark runs against `v2.6.4` / `timd1/vcfdist:v2.6.4`.
+3. Capture baseline correctness and benchmark runs against the documented `v2.6.4` baseline, currently the local `./src/vcfdist` binary timed directly by `/usr/bin/time -v` as recorded in `docs/benchmark-progress.json`; archive the timed benchmark output tree for later diffs.
 4. Write a design note with performance hypothesis, correctness risk, memory risk, benchmark plan, and expected output diff (`none`).
 5. Get approval before implementation, especially for algorithm, threading, memory-layout, runtime/language, dependency, CLI, or output-semantic changes.
 6. Implement in small commits that compile cleanly.
 7. Rerun correctness gates on the branch tip and diff against archived baseline outputs.
-8. Rerun performance gates and compare wall-clock runtime, scaling efficiency, and peak RSS.
+8. Rerun performance gates, validate the exact timed benchmark output tree against the archived baseline output tree, and compare wall-clock runtime, scaling efficiency, and peak RSS.
 9. Update `docs/benchmark-progress.json` with measurements or the enabling-only rationale.
 10. Update `docs/architecture.md` if file structure, data flow, concurrency, or language boundaries changed.
 11. Merge only after gates and approvals are satisfied.
@@ -65,16 +65,18 @@ The gates are not negotiable per slice. If a gate is wrong, update the governing
 
 Correctness gate:
 
-- Run the canonical `HG03784` chr21 GRCh38 fixture through the Docker command in `testing.md`.
-- Branch output tree must match the baseline output tree byte-for-byte or numerically under existing project tolerances.
-- Genotyping error and switch error rates must not change.
-- Smaller checks such as `make -C src -j24` and `demo/demo.sh` are useful during development but do not replace the chr21 gate.
+- Build `src/vcfdist` and run `bash demo/regression.sh`.
+- Branch output tree must match the checked-in `demo/results/` baseline under the comparison rules in `testing.md`.
+- Genotyping, switch, and flip error rates must not change.
+- Smaller ad hoc fixtures are useful during development but do not replace the demo regression gate.
 
 Performance gate:
 
-- Use Docker as the recorded benchmark environment.
-- Record `/usr/bin/time -v` wall-clock runtime and peak RSS.
-- Prefer thread sweep `1, 8, 16, 32, 64` when host capacity allows.
+- Use the recorded benchmark environment and command from `testing.md` / `docs/benchmark-progress.json`; currently this is native direct timing of `./src/vcfdist` with `/usr/bin/time -v`.
+- Use the documented performance benchmark tier for the slice; the bundled chr22 testset is only a provisional smoke tier until a larger tier is selected.
+- Record `/usr/bin/time -v` wall-clock runtime and peak RSS for the measured `vcfdist` process. Do not use host `/usr/bin/time -v docker run ...` RSS as `vcfdist` RSS.
+- Validate the output tree produced by that same timed `vcfdist` invocation; validation runs after `/usr/bin/time` exits and is not included in wall-clock runtime.
+- Prefer thread sweep `1, 2, 8, 16, 32, 64` when host capacity allows.
 - Compare branch and baseline at matching thread counts.
 - Keep per-core memory growth below 30% unless explicitly approved.
 

@@ -43,7 +43,7 @@ One taxonomy, used everywhere. Other docs in this harness reference these phase 
 
 - **Phase:** Verification.
 - **Input:** the Fixer's branch.
-- **Output:** a pass/fail verdict on the correctness and performance gates defined in `docs/refactoring-plan.md`, including output-diff status, wall-clock comparison, peak RSS comparison, and tracker consistency. If pass, the PR is cleared to merge. If fail, the gate's diff, benchmark delta, and failing invocation are recorded.
+- **Output:** a pass/fail verdict on the correctness and performance gates defined in `docs/refactoring-plan.md`, including output-diff status for the exact timed benchmark output tree, wall-clock comparison, peak RSS comparison, and tracker consistency. If pass, the PR is cleared to merge. If fail, the gate's diff, benchmark delta, and failing invocation are recorded.
 - **Constraint:** the gates are the gates. The Librarian does not negotiate or override them. If a gate is wrong, that is a change to `refactoring-plan.md` made separately.
 - **Where it lands:** a verdict comment on the PR.
 

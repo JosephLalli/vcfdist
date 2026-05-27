@@ -7,8 +7,8 @@ Coordinate safe, measured performance-refactor slices for vcfdist's existing C++
 ## Goals
 
 - Improve high-core scaling efficiency, especially at the 64-core target.
-- Work toward an eventual 2x wall-clock speedup on the canonical chr21 benchmark.
-- Preserve output files, precision/recall behavior, genotyping error rates, and switch error rates.
+- Work toward an eventual 2x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count.
+- Preserve output files, precision/recall behavior, genotyping error rates, switch error rates, and flip error rates.
 - Keep per-core memory growth below the threshold in `docs/refactoring-plan.md` unless explicitly approved.
 - Use benchmark evidence and architecture notes to select slices, not file size alone.
 - Keep changes small enough to review, benchmark, and revert.
@@ -43,17 +43,18 @@ Coordinate safe, measured performance-refactor slices for vcfdist's existing C++
 
 ### Correctness acceptance
 
-- Run the canonical `fixtures/hg03784_chr21_grch38/` fixture with the Docker command in `testing.md`.
-- Compare branch outputs to the archived `v2.6.4` baseline output tree.
-- Output files must match byte-for-byte or numerically under existing project tolerances where byte identity is not expected.
-- Genotyping error and switch error rates must not change.
+- Build `src/vcfdist` and run `bash demo/regression.sh`.
+- Compare branch outputs to the checked-in `demo/results/` baseline under the rules in `testing.md`.
+- Output files must match byte-for-byte or through the documented normalization where volatile headers are expected.
+- Genotyping, switch, and flip error rates must not change.
 - Any stdout/stderr differences must be explained in the verification note.
 
 ### Performance acceptance
 
-- Record canonical measurements in Docker unless the design explicitly states otherwise.
-- Record wall-clock runtime, maximum resident set size, thread count, image/digest, host CPU/NUMA notes, baseline tag/commit, branch commit, and output-diff verdict.
-- Preferred thread sweep: `1, 8, 16, 32, 64`.
+- Record canonical measurements with the environment and command in `testing.md` / `docs/benchmark-progress.json`; current chr22 baseline is native direct timing of `./src/vcfdist` with `/usr/bin/time -v`.
+- Validate the exact output tree produced by the timed benchmark invocation against the archived baseline output tree; validation runs after timing and does not affect the copied wall-clock value.
+- Record wall-clock runtime, maximum resident set size, thread count, execution environment and binary/image identifier, host CPU/NUMA notes, baseline tag/commit, branch commit, baseline/measured output artifact directories, validation command/log, and output-diff verdict.
+- Preferred thread sweep: `1, 2, 8, 16, 32, 64`.
 - Optional stretch sweep: `128, 256`.
 - Pure refactors must not materially slow the canonical benchmark.
 - Performance refactors may be accepted as enabling-only if the design explains the later optimization they enable and why any intermediate cost is acceptable.

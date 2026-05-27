@@ -21,25 +21,32 @@ The default path is C++ performance refactoring. Rust is on the table both as an
 
 ## Correctness gate (mandatory)
 
-No branch merges unless output correctness is unchanged against the authoritative baseline.
+No branch merges unless output correctness is unchanged against the authoritative demo regression baseline.
 
-Baseline tag/image for diffs and benchmark comparisons: `v2.6.4` unless this document is updated. Development branches start from `master`.
+Correctness diffs use the checked-in `demo/results/` baseline. Release baseline tag/image for performance comparisons: `v2.6.4` unless this document is updated. Development branches start from `master`.
 
 Required correctness checks:
 
-1. **`fixtures/hg03784_chr21_grch38/` correctness fixture.** Run vcfdist with the Docker-based command in `testing.md` against the `HG03784` chr21 GRCh38 fixture. The output tree must match the baseline output tree. The measured genotyping error and switch error rates for the dataset must not change.
+1. **Demo regression gate.** Build `src/vcfdist`, then run `bash demo/regression.sh`. The generated output files must match the checked-in `demo/results/` baseline under the comparison rules in `testing.md`. The measured genotyping, switch, and flip error counts must not change.
 
-Smaller fixtures, including `demo/demo.sh`, may be used for compile, smoke, and intermediate sanity checks. They do not replace the chr21 correctness fixture.
+Smaller ad hoc fixtures may be used for compile, smoke, and intermediate sanity checks. They do not replace the demo regression gate.
 
-Until automated CI carries this gate, the engineer running the slice runs the baseline and branch locally and archives enough information to reproduce the diff.
+CI runs the demo regression. The engineer running a slice should also run it locally on the branch tip and archive enough information to reproduce any diff.
 
 ## Performance gate (mandatory)
 
 Performance is a first-class gate, not a note at the end of a refactor.
 
-Canonical performance measurement uses Docker. Native runs may be useful for diagnosis, but Docker is the recorded benchmark environment unless a design note says otherwise.
+Canonical recorded performance measurement follows `testing.md` and `docs/benchmark-progress.json`. The current chr22 baseline uses the local `v2.6.4` binary timed directly by native `/usr/bin/time -v -o ... ./src/vcfdist ...` so wall-clock and RSS describe the `vcfdist` process. Do not record host `/usr/bin/time -v docker run ...` RSS; that measures the Docker client. A Docker run is acceptable only when the timing/RSS mechanism observes `vcfdist` inside the container or an approved design note documents an equivalent measurement.
 
-The canonical benchmark is the chr21 fixture described in `testing.md`. Smaller tests may be used during development, but performance claims must be grounded in the chr21 benchmark unless the design note explicitly classifies the slice as exploratory or enabling-only.
+The provisional performance smoke benchmark is the chr22 testset described in `testing.md`. Smaller tests may be used during development, but performance claims must be grounded in a documented performance tier. The current chr22 tier is useful for smoke timing and has baseline genotype, switch, and flip errors; high-core scaling claims require a larger non-pathological tier recorded in `docs/benchmark-progress.json` unless the design note explicitly classifies the slice as exploratory or enabling-only.
+
+A recorded performance result is incomplete unless the exact output tree produced
+by the timed `vcfdist` invocation is validated against the archived baseline
+output tree for the same fixture, command, and matching thread count when
+available. The validation runs after `/usr/bin/time` exits and is not part of
+the timed interval. Do not substitute the demo regression, an untimed rerun, or
+summary metrics for the timed-output diff.
 
 Each slice records results in the machine-readable tracker at `docs/benchmark-progress.json`.
 
@@ -50,17 +57,19 @@ Record at minimum:
 - wall-clock runtime;
 - maximum resident set size;
 - thread count;
-- Docker image or locally built image identifier;
+- execution environment and binary path, image tag, or digest used for the measured `vcfdist` process;
 - host CPU count and NUMA notes when available;
 - baseline commit/tag and branch commit;
-- output-diff verdict.
+- baseline and measured output artifact directories;
+- output validation command/script and log path;
+- output-diff verdict for the timed output tree.
 
 ### Thread targets
 
 The practical scaling target is efficient 64-core use. Use this thread sweep when the host supports it:
 
 ```text
-1, 8, 16, 32, 64
+1, 2, 8, 16, 32, 64
 ```
 
 If a larger NUMA host is available, optional stretch measurements may add:
@@ -69,11 +78,11 @@ If a larger NUMA host is available, optional stretch measurements may add:
 128, 256
 ```
 
-The key success metric is better scaling efficiency, followed by an eventual 2x wall-clock speedup on the canonical benchmark.
+The key success metric is better scaling efficiency, followed by an eventual 2x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count.
 
 ### Runtime acceptance
 
-- A pure refactor must not show a meaningful slowdown on the canonical benchmark.
+- A pure refactor must not show a meaningful slowdown on the documented performance benchmark used for that slice.
 - A performance refactor may be accepted as enabling-only if the design note says what later optimization it enables and why the intermediate cost is acceptable.
 - An optimization should show measured improvement in wall-clock runtime or scaling efficiency on the thread counts relevant to its design.
 
@@ -86,7 +95,7 @@ Do not trade speed for unbounded replication. Any design that duplicates referen
 ## Goals
 
 - Improve high-core scaling efficiency, with 64-core utilization as the near-term target.
-- Preserve vcfdist's current output semantics, genotyping error rates, and switch error rates.
+- Preserve vcfdist's current output semantics, genotyping error rates, switch error rates, and flip error rates.
 - Keep per-core memory growth under the documented threshold.
 - Reduce serial bottlenecks, load imbalance, avoidable allocation churn, and scheduler overhead.
 - Prefer data layouts and seams that support both C++ optimization and possible Rust kernel migration.
@@ -122,19 +131,19 @@ For each slice:
 
 1. **Branch from `master`.** Branch name: `refactor/<short-slice-name>` for pure/performance refactors, `perf/<short-slice-name>` for optimizations, or `port/<short-slice-name>` for approved port experiments.
 2. **Classify the slice.** Record whether it is pure refactor, performance refactor, optimization, or port/rewrite experiment.
-3. **Capture baselines.** Run the required correctness and benchmark commands on the `v2.6.4` baseline or the current documented baseline. Archive output trees and timing/RSS summaries.
+3. **Capture baselines.** Run the required correctness and benchmark commands on the `v2.6.4` baseline or the current documented baseline. Archive the timed output trees and timing/RSS summaries.
 4. **Write a design note.** The note must include the performance hypothesis, correctness risk, memory-risk assessment, benchmark plan, and expected output diff (`none`).
 5. **Get approval before implementation.** Design decisions are approved before code changes. Any algorithm, threading, memory-layout, language/runtime, dependency, CLI, or output-semantic change requires explicit approval.
 6. **Implement in commits that each compile clean under `-Wall -Wextra`.** Small commits beat large ones. Behavior preservation per commit is the bar unless the approved design says an intermediate commit is non-final.
 7. **Rerun correctness gates** on the branch tip and diff against archived baselines.
-8. **Rerun performance gates** on the branch tip and compare wall-clock, scaling efficiency, and peak RSS against baseline.
+8. **Rerun performance gates** on the branch tip, validate the exact timed output tree against the archived baseline output tree, and compare wall-clock, scaling efficiency, and peak RSS against baseline.
 9. **Update `docs/benchmark-progress.json`** with the measured result or with the reason the slice is enabling-only.
 10. **Update `architecture.md`** when the file structure, data flow, or concurrency model changes.
 11. **Merge only if gates and approvals are satisfied.** Once a design is approved, the implementation/verification loop runs to completion unless the gate fails or the design assumptions are proven wrong.
 
 ## What can go wrong
 
-- **Benchmark noise.** Docker, shared machines, I/O cache state, and NUMA placement can obscure small wins. Record host details and prefer repeated medians for short runs.
+- **Benchmark noise.** Shared machines, I/O cache state, NUMA placement, and container overhead when Docker is used can obscure small wins. Record host details and prefer repeated medians for short runs.
 - **NUMA regressions.** A change that scales on one socket may degrade on two or more sockets. Treat 128/256-core runs as stretch diagnostics until the 64-core path is healthy.
 - **Memory replication.** Per-thread caches and duplicated matrices can win wall-clock while violating the per-core memory rule. Account for peak RSS.
 - **Hidden ABI on `Globals`.** Many TUs include `globals.h` and reach into `Globals` members directly. Reordering or splitting fields in `Globals` will recompile most of `src/`. Minimize churn in `Globals` member layout during early slices.
@@ -152,4 +161,4 @@ This plan is healthy when:
 4. `architecture.md` reflects any changed file structure, data flow, or concurrency model.
 5. The next slice decision is based on the tracker and benchmark evidence.
 
-Long-term success is measured by better scaling efficiency, eventual 2x wall-clock speedup on the canonical chr21 benchmark, unchanged output/error rates, and bounded per-core memory.
+Long-term success is measured by better scaling efficiency, eventual 2x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count, unchanged output/error rates, and bounded per-core memory.

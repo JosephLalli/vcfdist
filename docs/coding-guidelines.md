@@ -59,7 +59,7 @@ Documented here so they can be matched, not invented.
 - Keep hot-path data layouts cache-friendly. Avoid adding pointer-heavy containers, node-based hash tables, or per-element heap allocation to inner loops without a measured reason.
 - Per-core memory usage must stay within the limit in `docs/refactoring-plan.md`. Any new thread-local cache, duplicated input structure, dynamic-programming buffer, or output buffer must have an explicit memory-risk note in the design.
 - Prefer bounded reusable buffers over repeated allocation in hot paths, but do not introduce global mutable caches without a threading and memory accounting plan.
-- Do not trade correctness for speed. Output files, genotyping error rates, and switch error rates must remain unchanged unless a separate feature proposal changes the public semantics.
+- Do not trade correctness for speed. Output files, genotyping error rates, switch error rates, and flip error rates must remain unchanged unless a separate feature proposal changes the public semantics.
 
 ## Const correctness and inlining
 

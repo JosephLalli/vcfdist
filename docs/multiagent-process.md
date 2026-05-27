@@ -25,11 +25,11 @@ The `docs/dev/` directory is created on demand the first time a merged note is c
 
 Defined in `docs/refactoring-plan.md` under "Correctness gate" and "Performance gate". The Librarian role enforces them; no other role can waive them. Changes to a gate are separate document updates, not per-slice decisions.
 
-Correctness gates protect output equivalence and the measured genotyping/switch error rates. Performance gates protect wall-clock runtime, scaling efficiency, and peak RSS/per-core memory behavior.
+Correctness gates protect output equivalence and the measured genotyping/switch/flip error rates. Performance gates protect wall-clock runtime, scaling efficiency, peak RSS/per-core memory behavior, and the output equivalence of the exact timed benchmark output tree.
 
 ## Benchmark tracker
 
-`docs/benchmark-progress.json` is the machine-readable live record of benchmark progress. It records the canonical baseline, target hardware assumptions, benchmark fixtures, measured slice results, and open measurement gaps.
+`docs/benchmark-progress.json` is the machine-readable live record of benchmark progress. It records the canonical baseline, target hardware assumptions, benchmark fixtures, measured slice results, output-validation policy, and open measurement gaps.
 
 The tracker is not a substitute for archived raw outputs. It is the index that lets the next Explorer/Oracle cycle choose work from evidence instead of memory.
 
