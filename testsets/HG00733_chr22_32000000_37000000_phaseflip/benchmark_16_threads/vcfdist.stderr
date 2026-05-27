@@ -1,0 +1,7 @@
+/workspace/src/vcfdist: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.34' not found (required by /workspace/src/vcfdist)
+/workspace/src/vcfdist: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.38' not found (required by /workspace/src/vcfdist)
+/workspace/src/vcfdist: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.32' not found (required by /workspace/src/vcfdist)
+/workspace/src/vcfdist: /lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.29' not found (required by /workspace/src/vcfdist)
+/workspace/src/vcfdist: /lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.30' not found (required by /workspace/src/vcfdist)
+Command exited with non-zero status 1
+elapsed=0:00.45 maxrss_kb=24576

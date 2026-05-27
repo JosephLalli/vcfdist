@@ -1,0 +1,168 @@
+[INFO  vcfdist 17:04:07] Command: '/mnt/ssd/lalli/vcfdist/src/vcfdist vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/query.1kgp.phaseflip.bcf vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/truth.hprc.bcf GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta --max-threads 4 --cluster size 100 --max-supercluster-size 1000 --largest-variant 500 --realign-query --realign-truth -p vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.'
+[INFO  vcfdist 17:04:07]  
+[INFO  vcfdist 17:04:07] [0/8] Loading reference FASTA 'GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta'
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23] [Q 0/8] Parsing QUERY VCF 'vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/query.1kgp.phaseflip.bcf'
+[WARN  vcfdist 17:04:23] 'PS' tag not defined in QUERY VCF header, assuming one phase set per contig
+[INFO  vcfdist 17:04:23]   Genotypes:
+[INFO  vcfdist 17:04:23]     0|1: 2708
+[INFO  vcfdist 17:04:23]     1|0: 2709
+[INFO  vcfdist 17:04:23]     1|1: 2892
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23] 2892 homozygous and multi-allelic variants in QUERY VCF, split for evaluation
+[WARN  vcfdist 17:04:23] 1 overlapping variants in QUERY VCF, skipped
+[WARN  vcfdist 17:04:23] 12 complex (CPX) variants in QUERY VCF, split into INS + DEL
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23]   Variant types:
+[INFO  vcfdist 17:04:23]     SNP: 9229
+[INFO  vcfdist 17:04:23]     INS: 938
+[INFO  vcfdist 17:04:23]     DEL: 1021
+[INFO  vcfdist 17:04:23]     CPX: 12
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23]   Contigs:
+[INFO  vcfdist 17:04:23]     [ 0] chr22: 5607 | 5605 variants
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23]   QUERY VCF overview:
+[INFO  vcfdist 17:04:23]     TOTAL: 11213
+[INFO  vcfdist 17:04:23]     KEPT : 11212
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23] [T 0/8] Parsing TRUTH VCF 'vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/truth.hprc.bcf'
+[WARN  vcfdist 17:04:23] 'PS' tag not defined in TRUTH VCF header, assuming one phase set per contig
+[INFO  vcfdist 17:04:23]   Genotypes:
+[INFO  vcfdist 17:04:23]     0|1: 3035
+[INFO  vcfdist 17:04:23]     1|0: 2616
+[INFO  vcfdist 17:04:23]     1|1: 3237
+[INFO  vcfdist 17:04:23]     1|2: 93
+[INFO  vcfdist 17:04:23]     2|1: 93
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23] 3423 homozygous and multi-allelic variants in TRUTH VCF, split for evaluation
+[WARN  vcfdist 17:04:23] 14 large (size > 500) variants in TRUTH VCF, skipped
+[WARN  vcfdist 17:04:23] 85 overlapping variants in TRUTH VCF, skipped
+[WARN  vcfdist 17:04:23] 160 complex (CPX) variants in TRUTH VCF, split into INS + DEL
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23]   Variant types:
+[INFO  vcfdist 17:04:23]     SNP: 9425
+[INFO  vcfdist 17:04:23]     INS: 1421
+[INFO  vcfdist 17:04:23]     DEL: 1392
+[INFO  vcfdist 17:04:23]     CPX: 160
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23]   Contigs:
+[INFO  vcfdist 17:04:23]     [ 0] chr22: 6079 | 6479 variants
+[INFO  vcfdist 17:04:23]  
+[INFO  vcfdist 17:04:23]   TRUTH VCF overview:
+[INFO  vcfdist 17:04:23]     TOTAL: 12657
+[INFO  vcfdist 17:04:23]     KEPT : 12558
+[INFO  vcfdist 17:04:23]   Writing original query VCF to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.orig-query.vcf'
+[INFO  vcfdist 17:04:24]   Writing original truth VCF to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.orig-truth.vcf'
+[INFO  vcfdist 17:04:24]  
+[INFO  vcfdist 17:04:24]   Checking contigs:
+[INFO  vcfdist 17:04:24]     All contig checks passed!
+[INFO  vcfdist 17:04:24]  
+[INFO  vcfdist 17:04:24] Clustering QUERY VCF 'vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/query.1kgp.phaseflip.bcf'
+[INFO  vcfdist 17:04:24]  
+[INFO  vcfdist 17:04:24] [Q 2/8] Realigning QUERY VCF 'vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/query.1kgp.phaseflip.bcf'
+[INFO  vcfdist 17:04:24]  
+[INFO  vcfdist 17:04:25] Clustering QUERY VCF 'vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/query.1kgp.phaseflip.bcf'
+[INFO  vcfdist 17:04:25]  
+[INFO  vcfdist 17:04:25] Clustering TRUTH VCF 'vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/truth.hprc.bcf'
+[INFO  vcfdist 17:04:25]  
+[INFO  vcfdist 17:04:25] [T 2/8] Realigning TRUTH VCF 'vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/truth.hprc.bcf'
+[INFO  vcfdist 17:04:25]  
+[INFO  vcfdist 17:04:25] Clustering TRUTH VCF 'vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/truth.hprc.bcf'
+[INFO  vcfdist 17:04:25]  
+[INFO  vcfdist 17:04:25] [4/8] Superclustering TRUTH and QUERY variants
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1383) at chr22:32183561-32184944, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1175) at chr22:32291418-32292593, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1442) at chr22:32294537-32295979, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1043) at chr22:32297520-32298563, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (2143) at chr22:32299889-32302032, breaking up into 3 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1150) at chr22:32759567-32760717, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1239) at chr22:33141002-33142241, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1027) at chr22:34395744-34396771, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (2153) at chr22:34397236-34399389, breaking up into 3 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1101) at chr22:34577868-34578969, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1307) at chr22:34684155-34685462, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1115) at chr22:35161307-35162422, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1211) at chr22:35163584-35164795, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1446) at chr22:35438022-35439468, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1815) at chr22:35693087-35694902, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1178) at chr22:35695952-35697130, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1009) at chr22:35699522-35700531, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1044) at chr22:36219437-36220481, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1003) at chr22:36264794-36265797, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1113) at chr22:36315315-36316428, breaking up into 2 superclusters
+[WARN  vcfdist 17:04:25] Max supercluster size (1000) exceeded (1437) at chr22:36948817-36950254, breaking up into 2 superclusters
+[INFO  vcfdist 17:04:25]            Total superclusters: 4777
+[INFO  vcfdist 17:04:25]   Largest supercluster (bases): 962
+[INFO  vcfdist 17:04:25]   Largest supercluster  (vars): 117
+[INFO  vcfdist 17:04:25]   Average supercluster (bases): 74.317
+[INFO  vcfdist 17:04:26]   Average supercluster  (vars): 4.987
+[INFO  vcfdist 17:04:26]               QUERY phase sets: 1
+[INFO  vcfdist 17:04:26]         QUERY phase block NG50: 50818468
+[INFO  vcfdist 17:04:26]               TRUTH phase sets: 1
+[INFO  vcfdist 17:04:26]         TRUTH phase block NG50: 50818468
+[INFO  vcfdist 17:04:26]  
+[INFO  vcfdist 17:04:26]   Sorting superclusters by size
+[INFO  vcfdist 17:04:26]  
+[INFO  vcfdist 17:04:26] [5/8] Calculating precision and recall
+[INFO  vcfdist 17:04:26]   Superclusters using   0.000 to  16.000 GB RAM each (  4 threads):     4777
+[INFO  vcfdist 17:04:26]   Superclusters using  16.000 to  32.000 GB RAM each (  2 threads):        0
+[INFO  vcfdist 17:04:26]   Superclusters using  32.000 to  64.000 GB RAM each (  1 threads):        0
+[INFO  vcfdist 17:04:29]     done with precision-recall
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29] [6/8] Skipping distance metrics
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29] [7/8] Phasing superclusters
+[INFO  vcfdist 17:04:29]   Contigs:
+[INFO  vcfdist 17:04:29]     [ 0] chr22: 4 switch errors, 0 flip errors, 1 phase blocks
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29]              Total  phase blocks: 1
+[INFO  vcfdist 17:04:29]              Total switch errors: 4
+[INFO  vcfdist 17:04:29]              Total   flip errors: 0
+[INFO  vcfdist 17:04:29]   Supercluster switch error rate: 0.083735%
+[INFO  vcfdist 17:04:29]     Supercluster flip error rate: 0.000000%
+[INFO  vcfdist 17:04:29]                Phase block  NG50: 0
+[INFO  vcfdist 17:04:29]   (switch)     Phase block NGC50: 0
+[INFO  vcfdist 17:04:29]   (switchflip) Phase block NGC50: 0
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29]   Writing phasing summary to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.phasing-summary.tsv'
+[INFO  vcfdist 17:04:29]   Writing switchflip results to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.switchflips.tsv'
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29] [8/8] Writing results
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29]   Writing precision-recall results to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.precision-recall.tsv'
+[INFO  vcfdist 17:04:29]   Writing precision-recall summary to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.precision-recall-summary.tsv'
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29] PRECISION-RECALL SUMMARY
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29] TYPE	THRESHOLD	TRUTH_TP	QUERY_TP	TRUTH_FN	QUERY_FP	PREC		RECALL		F1_SCORE	F1_QSCORE
+[INFO  vcfdist 17:04:29] SNP	NONE Q >= 0 	9143            9141            730             154             0.983432	0.926061	0.953885	13.361541
+[INFO  vcfdist 17:04:29] SNP	BEST Q >= 0 	9143            9141            730             154             0.983432	0.926061	0.953885	13.361541
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29] INDEL	NONE Q >= 0 	1820            1818            853             107             0.944416	0.680883	0.791284	6.804444
+[INFO  vcfdist 17:04:29] INDEL	BEST Q >= 0 	1820            1818            853             107             0.944416	0.680883	0.791284	6.804444
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29] SV	NONE Q >= 0 	1               1               54              0               1.000000	0.018182	0.035714	0.157943
+[INFO  vcfdist 17:04:29] SV	BEST Q >= 0 	1               1               54              0               1.000000	0.018182	0.035714	0.157943
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29] ALL	NONE Q >= 0 	10964           10960           1637            261             0.976740	0.870090	0.920335	10.987350
+[INFO  vcfdist 17:04:29] ALL	BEST Q >= 0 	10964           10960           1637            261             0.976740	0.870090	0.920335	10.987350
+[INFO  vcfdist 17:04:29]  
+[INFO  vcfdist 17:04:29]   Writing phasing results to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.phase-blocks.tsv'
+[INFO  vcfdist 17:04:29]   Writing superclustering results to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.superclusters.tsv'
+[INFO  vcfdist 17:04:30]   Writing query variant results to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.query.tsv'
+[INFO  vcfdist 17:04:30]   Writing truth variant results to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.truth.tsv'
+[INFO  vcfdist 17:04:30]   Writing GA4GH-compatible summary VCF to './vcfdist_candidate_search/HG00733_chr22_32000000_37000000_phaseflip/vcfdist.summary.vcf'
+[INFO  vcfdist 17:04:30]  
+[INFO  vcfdist 17:04:30] Timers:
+[INFO  vcfdist 17:04:30]   [0] reading         :   16.612s
+[INFO  vcfdist 17:04:30]   [1] clustering      :    0.027s
+[INFO  vcfdist 17:04:30]   [2] realigning      :    1.030s
+[INFO  vcfdist 17:04:30]   [3] reclustering    :    0.033s
+[INFO  vcfdist 17:04:30]   [4] superclustering :    0.207s
+[INFO  vcfdist 17:04:30]   [5] precision/recall:    3.948s
+[INFO  vcfdist 17:04:30]   [6] edit distance   :    0.000s
+[INFO  vcfdist 17:04:30]   [7] phasing         :    0.001s
+[INFO  vcfdist 17:04:30]   [8] writing         :    0.491s
+[INFO  vcfdist 17:04:30]   [9] total           :   22.710s
+elapsed=0:22.73 maxrss_kb=3391488
