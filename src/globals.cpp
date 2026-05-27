@@ -103,6 +103,8 @@ void Globals::parse_args(int argc, char ** argv) {
     if (ref_fasta_fp == NULL) {
         ERROR("Failed to open reference FASTA file '%s'", ref_fasta_fn.data());
     }
+    fclose(this->ref_fasta_fp);
+    this->ref_fasta_fp = NULL;
 
     /* handle optional arguments */
     for (int i = 4; i < argc;) {

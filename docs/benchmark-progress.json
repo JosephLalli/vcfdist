@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-26",
+  "last_updated": "2026-05-27",
   "baseline": {
     "tag": "v2.6.4",
     "docker_image": "timd1/vcfdist:v2.6.4",
@@ -120,10 +120,114 @@
       "status": "recorded"
     }
   ],
-  "slice_results": [],
+  "slice_results": [
+    {
+      "name": "bed_scoped_fai_reference_loading",
+      "slice_class": "optimization",
+      "status": "smoke_passed",
+      "base_commit": "001dc4b docs: refresh current documentation",
+      "branch": "master",
+      "summary": "When a BED is provided, fastaData loads only BED-listed reference contigs through an existing HTSlib .fai index and falls back to filtered kseq streaming when no index is available. No-BED runs keep the previous full-reference streaming behavior.",
+      "correctness_gate": {
+        "command": "make -C src -j24 && OUT_DIR=/mnt/ssd/lalli/vcfdist/out/opencode-runtime/demo-regression KEEP_OUT=1 bash demo/regression.sh",
+        "verdict": "PASS",
+        "log": "out/opencode-runtime/demo-regression"
+      },
+      "validation_tool": "tools/compare_vcfdist_runs.py",
+      "branch_runs": [
+        {
+          "threads": 1,
+          "baseline_wall_clock": "0:29.62",
+          "branch_wall_clock": "0:13.15",
+          "speedup_vs_baseline": 2.252,
+          "baseline_max_rss_kb": 3391488,
+          "branch_max_rss_kb": 151396,
+          "rss_ratio_vs_baseline": 0.045,
+          "baseline_artifact_dir": "/tmp/opencode/vcfdist-baseline-chr22-v2.6.4-native-time-run/threads_1",
+          "branch_artifact_dir": "out/opencode-runtime/branch_canonical_threads_1",
+          "validation_log": "out/opencode-runtime/branch_canonical_threads_1/compare_to_baseline.txt",
+          "output_diff_verdict": "PASS",
+          "genotyping_switch_flip_error_verdict": "PASS"
+        },
+        {
+          "threads": 2,
+          "baseline_wall_clock": "0:25.22",
+          "branch_wall_clock": "0:08.80",
+          "speedup_vs_baseline": 2.866,
+          "baseline_max_rss_kb": 3393536,
+          "branch_max_rss_kb": 180512,
+          "rss_ratio_vs_baseline": 0.053,
+          "baseline_artifact_dir": "/tmp/opencode/vcfdist-baseline-chr22-v2.6.4-native-time-run/threads_2",
+          "branch_artifact_dir": "out/opencode-runtime/branch_canonical_threads_2",
+          "validation_log": "out/opencode-runtime/branch_canonical_threads_2/compare_to_baseline.txt",
+          "output_diff_verdict": "PASS",
+          "genotyping_switch_flip_error_verdict": "PASS"
+        },
+        {
+          "threads": 8,
+          "baseline_wall_clock": "0:20.49",
+          "branch_wall_clock": "0:04.07",
+          "speedup_vs_baseline": 5.034,
+          "baseline_max_rss_kb": 3391488,
+          "branch_max_rss_kb": 279096,
+          "rss_ratio_vs_baseline": 0.082,
+          "baseline_artifact_dir": "/tmp/opencode/vcfdist-baseline-chr22-v2.6.4-native-time-run/threads_8",
+          "branch_artifact_dir": "out/opencode-runtime/branch_canonical_threads_8",
+          "validation_log": "out/opencode-runtime/branch_canonical_threads_8/compare_to_baseline.txt",
+          "output_diff_verdict": "PASS",
+          "genotyping_switch_flip_error_verdict": "PASS"
+        },
+        {
+          "threads": 16,
+          "baseline_wall_clock": "0:20.13",
+          "branch_wall_clock": "0:03.65",
+          "speedup_vs_baseline": 5.515,
+          "baseline_max_rss_kb": 3393536,
+          "branch_max_rss_kb": 336828,
+          "rss_ratio_vs_baseline": 0.099,
+          "baseline_artifact_dir": "/tmp/opencode/vcfdist-baseline-chr22-v2.6.4-native-time-run/threads_16",
+          "branch_artifact_dir": "out/opencode-runtime/branch_canonical_threads_16",
+          "validation_log": "out/opencode-runtime/branch_canonical_threads_16/compare_to_baseline.txt",
+          "output_diff_verdict": "PASS",
+          "genotyping_switch_flip_error_verdict": "PASS"
+        },
+        {
+          "threads": 32,
+          "baseline_wall_clock": "0:20.23",
+          "branch_wall_clock": "0:03.76",
+          "speedup_vs_baseline": 5.380,
+          "baseline_max_rss_kb": 3393536,
+          "branch_max_rss_kb": 462172,
+          "rss_ratio_vs_baseline": 0.136,
+          "baseline_artifact_dir": "/tmp/opencode/vcfdist-baseline-chr22-v2.6.4-native-time-run/threads_32",
+          "branch_artifact_dir": "out/opencode-runtime/branch_canonical_threads_32",
+          "validation_log": "out/opencode-runtime/branch_canonical_threads_32/compare_to_baseline.txt",
+          "output_diff_verdict": "PASS",
+          "genotyping_switch_flip_error_verdict": "PASS"
+        },
+        {
+          "threads": 64,
+          "baseline_wall_clock": "0:20.44",
+          "branch_wall_clock": "0:04.16",
+          "speedup_vs_baseline": 4.913,
+          "baseline_max_rss_kb": 3393536,
+          "branch_max_rss_kb": 614196,
+          "rss_ratio_vs_baseline": 0.181,
+          "baseline_artifact_dir": "/tmp/opencode/vcfdist-baseline-chr22-v2.6.4-native-time-run/threads_64",
+          "branch_artifact_dir": "out/opencode-runtime/branch_canonical_threads_64",
+          "validation_log": "out/opencode-runtime/branch_canonical_threads_64/compare_to_baseline.txt",
+          "output_diff_verdict": "PASS",
+          "genotyping_switch_flip_error_verdict": "PASS"
+        }
+      ],
+      "notes": [
+        "The largest improvement comes from removing full GRCh38 eager reference loading on BED-scoped runs; 64-thread reading time dropped from roughly 16 seconds during discovery to sub-second in the optimized run.",
+        "The chr22 fixture is now short enough that final high-core scaling claims still need a larger tier, per measurement policy."
+      ]
+    }
+  ],
   "open_measurement_gaps": [
     "Record host CPU, NUMA topology, local binary build identifier, and storage notes for each benchmark host.",
-    "Add a checked-in helper or documented command that validates benchmark output trees against archived baselines and extracts genotyping, switch, and flip error rates for tracker-level reporting.",
     "Confirm whether the bundled HG00733_chr22_32000000_37000000_phaseflip fixture is large enough for 64-core scaling claims; if not, add a larger chr22 benchmark tier before making high-core claims."
   ]
 }

@@ -38,7 +38,9 @@ int main(int argc, char **argv) {
     // parse reference fasta
     g.timers[TIME_TOTAL].start();
     g.timers[TIME_READ].start();
-    std::shared_ptr<fastaData> ref_ptr(new fastaData(g.ref_fasta_fp));
+    std::vector<std::string> ref_contigs;
+    if (g.bed_exists) ref_contigs = g.bed.contigs;
+    std::shared_ptr<fastaData> ref_ptr(new fastaData(g.ref_fasta_fn, ref_contigs));
 
     // parse query and truth VCFs
     std::shared_ptr<variantData> query_ptr(

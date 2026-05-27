@@ -154,6 +154,29 @@ metrics alone as a substitute for validating the exact timed performance output
 tree. A performance record is incomplete unless it has an output-diff verdict
 for that tree.
 
+### Saved run-comparison tool
+
+Use `tools/compare_vcfdist_runs.py` for the repeated baseline-versus-branch
+checks that pair output validation with runtime/RSS review. The tool compares
+the stable vcfdist output files, normalizes only `summary.vcf` headers already
+treated as volatile by the demo regression (`##fileDate` and `##CL`), parses
+`time.txt` files produced by `/usr/bin/time -v`, and prints the headline
+genotyping/phasing metrics that must remain unchanged.
+
+Example with repo-local artifact directories:
+
+```bash
+python3 tools/compare_vcfdist_runs.py \
+    out/opencode-runtime/profile_threads_64 \
+    out/opencode-runtime/branch_threads_64_v1 \
+    --prefix vcfdist.
+```
+
+The command exits nonzero if any stable output differs. Runtime and maximum RSS
+deltas are reported for the verification note and benchmark tracker; policy
+decisions such as whether a runtime change is sufficient still come from the
+refactoring plan and slice design.
+
 ## Correctness checks
 
 The demo regression is the canonical correctness check for performance work. It
@@ -171,6 +194,10 @@ The regression script writes to a temporary directory by default. To keep output
 ```bash
 KEEP_OUT=1 OUT_DIR=/tmp/vcfdist-demo-regression bash demo/regression.sh
 ```
+
+When write access is intentionally limited to the repository tree, set `OUT_DIR`
+under ignored `out/`, for example
+`OUT_DIR=$PWD/out/opencode-runtime/demo-regression`.
 
 Archive baseline and branch output trees separately before diffing. Do not overwrite the only copy of a baseline result.
 

@@ -11,6 +11,8 @@
 *.vcf
 *.pdf
 *.gz
+*.fai
+*.gzi
 *.gprof
 *.png
 src/vcfdist

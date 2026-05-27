@@ -22,7 +22,7 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 - `variant.h` / `variant.cpp` (1004 lines) — `ctgVariants` (per-contig, parallel arrays of variant fields) and `variantData` (top-level VCF holder: `variants[hap][ctg] -> shared_ptr<ctgVariants>`). The `variantData` constructor reads a VCF via HTSlib; `write_vcf` and `left_shift` are the other large methods.
 - `bed.h` / `bed.cpp` (288 lines) — `bedData` and `contigRegions`. Parses the optional `-b` BED and answers in/out-of-region queries.
-- `fasta.h` (header-only) — `fastaData`. Wraps an HTSlib FAI-indexed FASTA; held as `std::shared_ptr<fastaData>` and threaded through everything that needs reference sequence.
+- `fasta.h` (header-only) — `fastaData`. Holds reference sequence strings and contig lengths. When a BED is provided, `main.cpp` passes the BED contig list so `fastaData` can load only those contigs through an existing HTSlib `.fai` index; if the index is absent it falls back to kseq streaming filtered to the requested contigs. Without a BED, it keeps the previous full-reference streaming behavior. The object is held as `std::shared_ptr<fastaData>` and threaded through everything that needs reference sequence.
 - `cluster.h` / `cluster.cpp` (1263 lines) — `ctgSuperclusters` and `superclusterData`. Groups variants into clusters (per haplotype) and then into superclusters (cross-haplotype regions that must be evaluated together). The main clustering entry points are `simple_cluster(...)`, `wf_swg_cluster(...)`, and `superclusterData::supercluster(...)`; the rest is the BiWFA-driven realignment path selected by `--cluster biwfa`.
 - `phase.h` / `phase.cpp` (626 lines) — `ctgPhaseblocks`, `phaseblockData`, and the phase-block analysis that runs after precision/recall.
 - `edit.h` / `edit.cpp` (280 lines) — `editData` and the edit-distance summary across the comparison.
@@ -49,7 +49,7 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 `main()` runs the pipeline sequentially:
 
-1. **Read** — `fastaData` (reference), `variantData` (query), `variantData` (truth).
+1. **Read** — `fastaData` (reference; BED-scoped when `-b/--bed` is present), `variantData` (query), `variantData` (truth).
 2. **Cluster** — variants are clustered per haplotype, then superclustered across haplotypes (`cluster.cpp`).
 3. **Realign** (optional, gated by `--realign-query` / `--realign-truth`) — left-shifts and re-emits the input VCFs.
 4. **Precision / recall** — `precision_recall_threads_wrapper` in `dist.cpp` partitions superclusters across threads and computes TP/FP/FN with credit via BiWFA.

@@ -9,6 +9,7 @@ One-page map of the documents that drive vcfdist performance refactor work. Read
 - [`docs/multiagent-process.md`](docs/multiagent-process.md) — orchestrator-facing process notes (artifact locations, loop boundaries). Companion to `AGENTS.md`.
 - [`testing.md`](testing.md) — the demo correctness regression gate, the `HG00733` chr22 GRCh38 performance smoke fixture, native `/usr/bin/time -v` benchmark command, same-run output validation requirement, and measurement protocol.
 - [`docs/benchmark-progress.json`](docs/benchmark-progress.json) — machine-readable live tracker for baseline measurements, slice results, scaling targets, and measurement gaps.
+- [`tools/compare_vcfdist_runs.py`](tools/compare_vcfdist_runs.py) — saved helper for comparing timed benchmark output trees, parsing `/usr/bin/time -v` results, and reporting runtime/RSS deltas with headline accuracy metrics.
 - [`demo/regression.sh`](demo/regression.sh) — the chr1 5 Mb automated correctness regression gate against checked-in `demo/results/`.
 - [`demo/demo.sh`](demo/demo.sh) — the original chr1 5 Mb demo/plot script, useful for manual visual refreshes.
 - [`conductor/`](conductor/) — owned by the Conductor orchestrator; not edited from the repo side.
