@@ -88,8 +88,9 @@ Inputs:
 
 Indexes are included for the query and truth files, and the reference FASTA has
 its `.fai` alongside it. The archived `vcfdist.*` files in the fixture directory
-are the expected output baseline for the command documented in the fixture
-README.
+are the expected output baseline for the command documented in the fixture README.
+A `time.txt` from the canonical threads=64 run is also bundled; `compare_vcfdist_runs.py`
+uses it to report runtime and RSS deltas when validating new runs against the fixture.
 
 Origin:
 
@@ -110,6 +111,85 @@ Current recorded native timings for thread counts `1, 2, 8, 32, 64` live in
 is `out/opencode-runtime/HG00733_chr2_35950000_45090000_current_threads/`.
 Each timed output tree was validated against the archived fixture outputs with
 `tools/compare_vcfdist_runs.py --prefix vcfdist.`.
+
+## HG00733 full-chr2 canonical performance benchmark
+
+**This is the canonical fixture for measuring wall-clock speedup.** Use it for
+every performance-optimization slice, not the windowed chr2 or chr22 fixtures.
+The windowed fixtures are too short to saturate high core counts and do not
+expose phases (clustering, realigning) that dominate full-chromosome runs.
+
+The longest-running bundled fixture is `HG00733_chr2_full`. It covers the complete
+`chr2` arm for sample `HG00733` on `GRCh38` and is the repo-local fixture for
+evaluating vcfdist performance under production-scale input sizes and non-default
+algorithm parameters.
+
+The query and truth files are the full per-sample chr2 callsets with no region
+subsetting. The selected parameter set (`--credit-threshold 0.7`,
+`--max-supercluster-size 20000`, `--largest-variant 800`) differs materially from
+the other chr2 fixtures and exercises a qualitatively different workload: lower
+credit threshold permits more credit assignments to propagate, larger supercluster
+cap allows more variants to be processed in a single cluster, and a higher variant
+size limit increases the number of SVs evaluated.
+
+Inputs:
+
+- `fixtures/HG00733_chr2_full/query.1kgp.bcf`
+- `fixtures/HG00733_chr2_full/truth.hprc.bcf`
+- Reference FASTA: `/mnt/ssd/lalli/phasing_T2T/GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta` (must be available at this path)
+- `fixtures/HG00733_chr2_full/region.bed` for provenance; the recorded command uses the already-subset BCFs and does not pass `-b`
+
+Indexes are included for the query and truth files, and the reference FASTA has
+its `.fai` alongside it. The archived `vcfdist.*` files in the fixture directory
+are the expected output baseline for the command documented in the fixture README.
+A `time.txt` from the canonical threads=64 run is also bundled; `compare_vcfdist_runs.py`
+uses it to report runtime and RSS deltas when validating new runs against the fixture.
+
+Origin:
+
+- Sample: `HG00733`
+- Genome build: `GRCh38`
+- Contig: `chr2`
+- Subset window: full chr2 (`chr2:10,000-242,183,311`)
+- BED interval: `chr2\t0\t242193529` (0-based, GRCh38 chr2 length; provenance only)
+- Bundled query records: 6088598
+- Bundled truth records: 3403777
+- Reference scope: full `GRCh38` FASTA
+- Reference source: `GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta`
+- Truth source: `truth.hprc.bcf` (HPRC v2.0)
+- Query source: `query.1kgp.bcf` (1KGP)
+
+The baseline timing for threads=64 and all current recorded runs live in
+`docs/benchmark-progress.json` under the `HG00733_chr2_full` fixture entry. The
+output artifact root is `out/opencode-runtime/HG00733_chr2_full_threads_<N>/`.
+Each timed output tree must be validated against the archived fixture outputs with
+`tools/compare_vcfdist_runs.py --prefix vcfdist.` before recording performance
+results.
+
+### Canonical timed command
+
+```bash
+THREADS=64
+OUT=out/opencode-runtime/HG00733_chr2_full_threads_${THREADS}
+mkdir -p "$OUT"
+
+/usr/bin/time -v -o "$OUT/time.txt" \
+    ./src/vcfdist \
+    fixtures/HG00733_chr2_full/query.1kgp.bcf \
+    fixtures/HG00733_chr2_full/truth.hprc.bcf \
+    /mnt/ssd/lalli/phasing_T2T/GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta \
+    -t "${THREADS}" \
+    --credit-threshold 0.7 \
+    --max-supercluster-size 20000 \
+    --largest-variant 800 \
+    --realign-query \
+    --realign-truth \
+    -p "$OUT/vcfdist." \
+    -v 0
+
+python3 tools/compare_vcfdist_runs.py \
+    fixtures/HG00733_chr2_full "$OUT" --prefix vcfdist.
+```
 
 ## VCF/BCF inspection
 
@@ -339,7 +419,7 @@ The near-term target is efficient 64-core use. Stretch measurements help charact
 
 For short runs, use the median of three or more runs. The bundled chr22 fixture runs in roughly 20-30 seconds on the recorded baseline host and is not enough by itself for final 64-core scaling claims. If a run is unexpectedly under 20 seconds, stop and decide whether the fixture, command, or documentation is stale before recording scaling evidence. A single baseline/branch pair at the relevant thread count is acceptable for an intermediate smoke check, but final performance claims should repeat near-threshold results and use a benchmark tier large enough to exercise the target core count.
 
-Per-core memory growth must stay below 30% relative to baseline at the same thread count unless the design was explicitly approved for a larger increase. Compare `(branch peak RSS / threads)` to `(baseline peak RSS / threads)`; at equal thread counts this is the same as requiring branch peak RSS below `1.3x` baseline peak RSS.
+Per-core memory growth must stay below `3.0x` relative to baseline at the same thread count unless the design was explicitly approved for a larger increase. Compare `(branch peak RSS / threads)` to `(baseline peak RSS / threads)`; at equal thread counts this is the same as requiring branch peak RSS below `3.0x` baseline peak RSS. The previous `1.3x` cap was relaxed on 2026-05-28 in exchange for higher wall-clock parallelism on the `HG00733_chr2_full` benchmark; on that fixture the relaxed cap is `~29 GB` against the `9.68 GB` baseline.
 
 ## Smaller checks
 
