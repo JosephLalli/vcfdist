@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <atomic>
 #include <string>
 #include <set>
 #include <vector>
@@ -28,6 +30,63 @@ struct RefList4 {
     const T& operator[](size_t i) const {
         return *v[i];
     }
+};
+
+static std::atomic<int> pr_nested_alignment_extra_workers(0);
+static constexpr int PR_NESTED_ALIGNMENT_EXTRA_WORKERS = CALLSETS * HAPS - 1;
+static constexpr double PR_ALIGNMENT_ESTIMATED_BYTES_PER_CELL = 20.0;
+static constexpr double PR_NESTED_ALIGNMENT_MIN_RAM_STEP_FRACTION = 0.10;
+
+static size_t pr_alignment_cell_estimate(
+        const std::string & query1, const std::string & query2,
+        const std::string & truth1, const std::string & truth2) {
+    size_t query_len = std::max(query1.size(), query2.size());
+    size_t truth_len = std::max(truth1.size(), truth2.size());
+    return query_len * truth_len;
+}
+
+static double pr_alignment_ram_gb_estimate(size_t cells) {
+    return double(cells) * PR_ALIGNMENT_ESTIMATED_BYTES_PER_CELL /
+            (1000.0 * 1000.0 * 1000.0);
+}
+
+static bool should_use_nested_pr_alignment_threads(
+        const std::string & query1, const std::string & query2,
+        const std::string & truth1, const std::string & truth2) {
+    double smallest_ram_step = g.ram_steps.empty() ?
+            g.max_ram / std::max(1, g.max_threads) : g.ram_steps[0];
+    size_t cells = pr_alignment_cell_estimate(query1, query2, truth1, truth2);
+    return pr_alignment_ram_gb_estimate(cells) >=
+            smallest_ram_step * PR_NESTED_ALIGNMENT_MIN_RAM_STEP_FRACTION;
+}
+
+static bool reserve_pr_nested_alignment_workers() {
+    if (g.max_threads < 16) return false;
+
+    int extra_worker_limit = std::max(PR_NESTED_ALIGNMENT_EXTRA_WORKERS, g.max_threads / 4);
+    int current = pr_nested_alignment_extra_workers.load();
+    while (current + PR_NESTED_ALIGNMENT_EXTRA_WORKERS <= extra_worker_limit) {
+        if (pr_nested_alignment_extra_workers.compare_exchange_weak(
+                    current, current + PR_NESTED_ALIGNMENT_EXTRA_WORKERS)) return true;
+    }
+    return false;
+}
+
+static void release_pr_nested_alignment_workers() {
+    pr_nested_alignment_extra_workers.fetch_sub(PR_NESTED_ALIGNMENT_EXTRA_WORKERS);
+}
+
+class PrNestedAlignmentWorkerReservation {
+public:
+    explicit PrNestedAlignmentWorkerReservation(bool should_reserve) :
+            reserved(should_reserve && reserve_pr_nested_alignment_workers()) {}
+    ~PrNestedAlignmentWorkerReservation() {
+        if (reserved) release_pr_nested_alignment_workers();
+    }
+    bool active() const { return reserved; }
+
+private:
+    bool reserved;
 };
 
 /******************************************************************************/
@@ -1883,9 +1942,11 @@ void precision_recall_wrapper(
         for (int i = 0; i < CALLSETS*HAPS; i++)
             swap_pred_maps.push_back(std::shared_ptr< std::unordered_map<idx1, idx1> >(new std::unordered_map<idx1, idx1>()));
 
-        // if memory-limited and each subproblem is large, 
-        // spawn a new thread for each of the 4 alignments
-        if (thread4) {
+        // If memory-limited and each subproblem is large, spawn a new thread
+        // for each of the 4 alignments. For the lowest-memory group, only do
+        // this for very large superclusters and reserve a small global budget
+        // of extra workers to avoid broad oversubscription.
+        auto run_threaded_alignments = [&]() {
             std::vector<std::thread> threads;
             for (int ti = 0; ti < CALLSETS*HAPS; ti++) {
                 threads.push_back(std::thread( calc_prec_recall_aln,
@@ -1900,7 +1961,8 @@ void precision_recall_wrapper(
             }
             for (std::thread & t : threads)
                 t.join();
-        } else { // calculate 4 alignments in this thread
+        };
+        auto run_serial_alignments = [&]() {
             calc_prec_recall_aln(
                     query1, query2, truth1, truth2, ref_q1,
                     query1_ref_ptrs, ref_query1_ptrs, 
@@ -1908,6 +1970,17 @@ void precision_recall_wrapper(
                     truth1_ref_ptrs, truth2_ref_ptrs,
                     aln_score, aln_ptrs, swap_pred_maps,
                     aln_query_ref_end, 0, CALLSETS*HAPS, false);
+        };
+
+        if (thread4) {
+            run_threaded_alignments();
+        } else if (thread_step == 0 && should_use_nested_pr_alignment_threads(
+                    query1, query2, truth1, truth2)) {
+            PrNestedAlignmentWorkerReservation nested_worker_reservation(true);
+            if (nested_worker_reservation.active()) run_threaded_alignments();
+            else run_serial_alignments();
+        } else { // calculate 4 alignments in this thread
+            run_serial_alignments();
         }
 
         // store optimal phasing for each supercluster
