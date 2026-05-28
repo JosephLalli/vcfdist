@@ -1763,62 +1763,31 @@ void precision_recall_threads_wrapper(
                 int(sc_groups[i][CTG_IDX].size()));
     }
 
-    int thread_step = g.thread_nsteps-1;
-    int start = 0;
-    while (thread_step >= 0) {
-
-        // init
+    for (int thread_step = g.thread_nsteps - 1; thread_step >= 0; thread_step--) {
         int nthreads = g.thread_steps[thread_step];
-        int nscs = sc_groups[thread_step][SC_IDX].size() - start;
+        int nscs = static_cast<int>(sc_groups[thread_step][SC_IDX].size());
+        if (nscs == 0) continue;
+
+        bool thread4 = (thread_step >= 2);
+        std::atomic<int> next_sc(0);
+
+        auto worker = [&]() {
+            while (true) {
+                int idx = next_sc.fetch_add(1, std::memory_order_relaxed);
+                if (idx >= nscs) break;
+                precision_recall_wrapper(
+                    clusterdata_ptr.get(),
+                    std::cref(sc_groups),
+                    thread_step, idx, idx + 1, thread4);
+            }
+        };
+
         std::vector<std::thread> threads;
-
-        // all threads can solve at least one problem at this level
-        if (nscs >= nthreads) {
-
-            // distribute many subproblems evenly among threads
-            bool thread4 = thread_step >= 2; // max_threads/4+
-            for (int t = 0; t < nthreads; t++) {
-                int size = nscs / nthreads;
-                threads.push_back(std::thread(precision_recall_wrapper,
-                            clusterdata_ptr.get(), std::cref(sc_groups),
-                            thread_step, start, start+size, thread4));
-                start += size;
-            }
-            for (std::thread & t : threads)
-                t.join();
-
-            // we fully finished all problems at this size
-            if (nscs % nthreads == 0) {
-                thread_step--;
-                start = 0;
-            }
-
-        } else { // not enough work for all threads at this level
-
-            // each thread solves one problem, 
-            // at multiple levels until RAM limit reached
-            float total_ram = 0;
-            while (total_ram < g.max_ram && thread_step >= 0) {
-                while (sc_groups[thread_step][SC_IDX].size() == 0) {
-                    thread_step--;
-                    if (thread_step < 0) break;
-                }
-                bool thread4 = thread_step >= 2; // max_threads/4+
-                if (thread_step < 0) break;
-                threads.push_back(std::thread(precision_recall_wrapper,
-                            clusterdata_ptr.get(), std::cref(sc_groups),
-                            thread_step, start, start+1, thread4));
-                start++;
-                total_ram += g.ram_steps[thread_step];
-                if (start >= int(sc_groups[thread_step][SC_IDX].size())) {
-                    start = 0;
-                    thread_step--;
-                }
-            }
-
-            for (std::thread & t : threads)
-                t.join();
-        }
+        threads.reserve(nthreads);
+        for (int t = 0; t < nthreads; t++)
+            threads.emplace_back(worker);
+        for (std::thread & t : threads)
+            t.join();
     }
 }
 
@@ -2603,98 +2572,142 @@ int swg_max_reach(const std::string & query, const std::string & ref,
 /******************************************************************************/
 
 
+struct RealignWorkItem {
+    int         hap;
+    std::string ctg;
+    int         cluster_idx;
+    int         beg_idx, end_idx;
+    int         beg, end;
+    float       qual;
+    int         phase_set;
+};
+
+struct RealignResult {
+    std::vector<int> cigar;
+};
+
 std::shared_ptr<variantData> wf_swg_realign(
-        std::shared_ptr<variantData> vcf, 
-        std::shared_ptr<fastaData> ref_fasta, 
+        std::shared_ptr<variantData> vcf,
+        std::shared_ptr<fastaData> ref_fasta,
         int sub, int open, int extend, int callset, bool print /* = false */) {
+    (void)print;
     if (g.verbosity >= 1) INFO(" ");
     if (g.verbosity >= 1) INFO("%s[%s 2/8] Realigning %s VCF%s '%s'", COLOR_PURPLE,
-            callset == QUERY ? "Q" : "T", callset_strs[callset].data(), 
+            callset == QUERY ? "Q" : "T", callset_strs[callset].data(),
             COLOR_WHITE, vcf->filename.data());
 
-    // copy vcf header data over to results vcf
-    std::shared_ptr<variantData> results(new variantData());
-    results->set_header(vcf);
-
-    // iterate over each contig haplotype
+    // build work list (serial, preserves hap=0->1, map order, cluster 0..N-1)
+    std::vector<RealignWorkItem> work;
     for (int hap = 0; hap < 2; hap++) {
-        for (auto itr = vcf->variants[hap].begin(); 
+        for (auto itr = vcf->variants[hap].begin();
                 itr != vcf->variants[hap].end(); itr++) {
             std::string ctg = itr->first;
             std::shared_ptr<ctgVariants> vars = itr->second;
             if (vars->poss.size() == 0) continue;
 
-            // realign each cluster of variants
             for (int cluster = 0; cluster < int(vars->clusters.size()-1); cluster++) {
-                int beg_idx = vars->clusters[cluster];
-                int end_idx = vars->clusters[cluster+1];
-                int beg = vars->poss[beg_idx]-1;
-                int end = vars->poss[end_idx-1] + vars->rlens[end_idx-1]+1;
+                RealignWorkItem w;
+                w.hap         = hap;
+                w.ctg         = ctg;
+                w.cluster_idx = cluster;
+                w.beg_idx     = vars->clusters[cluster];
+                w.end_idx     = vars->clusters[cluster+1];
+                w.beg         = vars->poss[w.beg_idx]-1;
+                w.end         = vars->poss[w.end_idx-1] + vars->rlens[w.end_idx-1]+1;
 
                 // variant qual is minimum in cluster
-                float qual = g.max_qual;
-                for (int i = beg_idx; i < end_idx; i++) {
-                    qual = std::min(qual, vars->var_quals[i]);
-                }
+                w.qual = g.max_qual;
+                for (int i = w.beg_idx; i < w.end_idx; i++)
+                    w.qual = std::min(w.qual, vars->var_quals[i]);
 
                 // phase set is first non-zero phase set
-                int phase_set = 0;
-                for (int i = beg_idx; i < end_idx; i++) {
-                    if (vars->phase_sets[i] != phase_set) {
-                        phase_set = vars->phase_sets[i];
+                w.phase_set = 0;
+                for (int i = w.beg_idx; i < w.end_idx; i++) {
+                    if (vars->phase_sets[i] != w.phase_set) {
+                        w.phase_set = vars->phase_sets[i];
                         break;
                     }
                 }
 
-                // generate strings
-                std::string query = 
-                    generate_str(ref_fasta, vars, ctg, beg_idx, end_idx, beg, end);
-                std::string ref = ref_fasta->fasta.at(ctg).substr(beg, end-beg);
-                
-                // perform alignment
-                if (print) printf("REF:   %s\n", ref.data());
-                if (print) printf("QUERY: %s\n", query.data());
-                std::vector< std::vector< std::vector<uint8_t> > > ptrs(MATS);
-                std::vector< std::vector< std::vector<int> > > offs(MATS);
-                int s = 0;
-                std::reverse(query.begin(), query.end()); // for left-aligned INDELs
-                std::reverse(ref.begin(), ref.end());
-                wf_swg_align(query, ref, ptrs, offs, s, sub, open, extend, false);
-                
-                // backtrack
-                std::vector<int> cigar = wf_swg_backtrack(query, ref, ptrs, offs, 
-                        s, sub, open, extend, false);
-                std::reverse(query.begin(), query.end());
-                std::reverse(ref.begin(), ref.end());
-                std::reverse(cigar.begin(), cigar.end());
-                if (print) print_cigar(cigar);
+                work.push_back(std::move(w));
+            }
+        }
+    }
 
-                // compare distances
-                if (print) {
-                    int new_score = calc_cig_swg_score(cigar, sub, open, extend);
-                    int old_score = calc_vcf_swg_score(vars, cluster, cluster+1, 
-                            sub, open, extend);
-                    if (new_score < old_score) {
-                        printf("\n\tCluster %d: %d variants (%d-%d)\n", 
-                            cluster, end_idx-beg_idx, beg_idx, end_idx);
-                        for (int i = beg_idx; i < end_idx; i++) {
-                            printf("\t\t%s %d\t%s\t%s\tQ=%f\n", 
-                                ctg.data(), vars->poss[i], 
-                                vars->refs[i].size() ?  vars->refs[i].data() : "_", 
-                                vars->alts[i].size() ?  vars->alts[i].data() : "_",
-                                vars->var_quals[i]);
-                        }
-                        printf("Old score: %d\n", old_score);
-                        printf("New score: %d\n", new_score);
-                    }
-                }
-                
-                // save resulting variants
-                results->add_variants(cigar, hap, beg, ctg, query, ref, qual, phase_set);
+    // pre-size result vector so workers can write by index without synchronisation
+    std::vector<RealignResult> res(work.size());
 
-            } // cluster
-        } // contig
-    } // hap
+    // parallel work-stealing dispatch
+    std::atomic<size_t> next{0};
+    // Budget for concurrent ptrs/offs allocations: cap at 3 GB or 30% of g.max_ram,
+    // whichever is smaller. Each worker estimates its claim as MATS * span^2 * 5 bytes
+    // (conservative upper bound on score s ≈ span). Small clusters claim almost
+    // nothing and run freely; large clusters throttle themselves via this spinwait.
+    const size_t realign_ram_budget =
+        std::min((size_t)(g.max_ram * 1e9 * 0.30), (size_t)(3ULL << 30));
+    std::atomic<size_t> ram_claimed{0};
+    int nthreads = std::max(1, g.max_threads);
+    auto worker = [&]() {
+        for (;;) {
+            size_t idx = next.fetch_add(1, std::memory_order_relaxed);
+            if (idx >= work.size()) return;
+            const RealignWorkItem& w = work[idx];
+            size_t span = (size_t)(w.end - w.beg);
+            size_t est = (size_t)MATS * span * span * 5;
+
+            // Spinwait until this cluster's estimated RAM fits in the budget.
+            // Cap claim to the budget so oversized clusters (est > budget) still
+            // terminate: claiming the full budget forces cur==0, serializing them
+            // one at a time rather than spinning forever.
+            size_t claim = std::min(est, realign_ram_budget);
+            for (;;) {
+                size_t cur = ram_claimed.load(std::memory_order_relaxed);
+                if (cur + claim <= realign_ram_budget &&
+                    ram_claimed.compare_exchange_weak(cur, cur + claim,
+                        std::memory_order_acquire, std::memory_order_relaxed))
+                    break;
+                std::this_thread::yield();
+            }
+
+            std::shared_ptr<ctgVariants> vars = vcf->variants[w.hap].at(w.ctg);
+            std::string query = generate_str(ref_fasta, vars, w.ctg,
+                                             w.beg_idx, w.end_idx, w.beg, w.end);
+            std::string ref_s = ref_fasta->fasta.at(w.ctg).substr(w.beg, w.end - w.beg);
+            std::vector< std::vector< std::vector<uint8_t> > > ptrs(MATS);
+            std::vector< std::vector< std::vector<int> > > offs(MATS);
+            int s = 0;
+            std::reverse(query.begin(), query.end());
+            std::reverse(ref_s.begin(), ref_s.end());
+            wf_swg_align(query, ref_s, ptrs, offs, s, sub, open, extend, false);
+            std::vector<int> cigar = wf_swg_backtrack(query, ref_s, ptrs, offs,
+                                                      s, sub, open, extend, false);
+            std::reverse(query.begin(), query.end());
+            std::reverse(ref_s.begin(), ref_s.end());
+            std::reverse(cigar.begin(), cigar.end());
+            ram_claimed.fetch_sub(claim, std::memory_order_release);
+            res[idx] = {std::move(cigar)};
+        }
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(nthreads);
+    for (int t = 0; t < nthreads; t++) threads.emplace_back(worker);
+    for (auto& t : threads) t.join();
+
+    // serial gather — visits items in original order, keeping add_variants serial
+    // query/ref strings are regenerated from the work item rather than stored in
+    // res, avoiding O(total_clusters) string memory during the parallel phase.
+    std::shared_ptr<variantData> results(new variantData());
+    results->set_header(vcf);
+    for (size_t i = 0; i < res.size(); i++) {
+        const RealignWorkItem& w = work[i];
+        std::shared_ptr<ctgVariants> vars = vcf->variants[w.hap].at(w.ctg);
+        std::string query = generate_str(ref_fasta, vars, w.ctg,
+                                         w.beg_idx, w.end_idx, w.beg, w.end);
+        std::string ref_s = ref_fasta->fasta.at(w.ctg).substr(w.beg, w.end - w.beg);
+        results->add_variants(res[i].cigar, w.hap, w.beg, w.ctg,
+                              query, ref_s, w.qual, w.phase_set);
+    }
 
     return results;
 }
