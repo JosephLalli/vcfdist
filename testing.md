@@ -64,6 +64,53 @@ Origin:
 - Truth source: `truth.hprc.bcf` (HPRC v2.0)
 - Query source: `query.1kgp.phaseflip.bcf` (1KGP with controlled phase flips)
 
+## HG00733 chr2 regression timing fixture
+
+The larger bundled chr2 fixture is `HG00733_chr2_35950000_45090000`. It is built
+around sample `HG00733` on `chr2` / `GRCh38` and is the current repo-local
+regression timing fixture for runs that should expose parallel precision/recall
+work across multiple natural superclusters.
+
+The query and truth files are pre-subset to the region
+`chr2:35,950,000-45,090,000`. The selected window includes the original
+expensive natural supercluster near `chr2:45,079,682-45,084,505` plus other
+high-cost superclusters near `chr2:36,181,890-36,184,941`,
+`chr2:41,504,183-41,507,559`, and `chr2:38,710,998-38,713,442`. This makes the
+fixture useful for checking that independent superclusters can be processed in
+parallel while preserving deterministic flip-error reporting.
+
+Inputs:
+
+- `fixtures/HG00733_chr2_35950000_45090000/query.1kgp.bcf`
+- `fixtures/HG00733_chr2_35950000_45090000/truth.hprc.bcf`
+- Reference FASTA: `/mnt/ssd/lalli/phasing_T2T/GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta` (must be available at this path)
+- `fixtures/HG00733_chr2_35950000_45090000/region.bed` for provenance; the recorded command uses the already-subset BCFs and does not pass `-b`
+
+Indexes are included for the query and truth files, and the reference FASTA has
+its `.fai` alongside it. The archived `vcfdist.*` files in the fixture directory
+are the expected output baseline for the command documented in the fixture
+README.
+
+Origin:
+
+- Sample: `HG00733`
+- Genome build: `GRCh38`
+- Contig: `chr2`
+- Subset window: `chr2:35,950,000-45,090,000`
+- BED interval: `chr2\t35949999\t45090000` (0-based, half-open)
+- Bundled query records: 266435
+- Bundled truth records: 146335
+- Reference scope: full `GRCh38` FASTA retained so absolute coordinates do not need rebasing
+- Reference source: `GRCh38_full_analysis_set_plus_decoy_hla.uppercase.fasta`
+- Truth source: `truth.hprc.bcf` (HPRC v2.0)
+- Query source: `query.1kgp.bcf` (1KGP)
+
+Current recorded native timings for thread counts `1, 2, 8, 32, 64` live in
+`docs/benchmark-progress.json`. The output artifact root for the current sweep
+is `out/opencode-runtime/HG00733_chr2_35950000_45090000_current_threads/`.
+Each timed output tree was validated against the archived fixture outputs with
+`tools/compare_vcfdist_runs.py --prefix vcfdist.`.
+
 ## VCF/BCF inspection
 
 `bcftools` is available in the benchmark environment. Use `bcftools view` for read-only inspection (headers, samples, contigs, region counts). `vcfdist` evaluates one sample at a time, so multi-sample panels must be inspected for sample names and then subset to one sample before they are used as benchmark inputs:

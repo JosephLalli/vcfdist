@@ -18,6 +18,11 @@
 src/vcfdist
 src/test
 
+# Curated HG00733 chr2 regression fixture intentionally tracks text/VCF/BED
+# baselines that are ignored elsewhere.
+!fixtures/HG00733_chr2_35950000_45090000/
+!fixtures/HG00733_chr2_35950000_45090000/**
+
 # ignore analysis
 analysis/*/*/
 analysis-v2/*/*/
