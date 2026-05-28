@@ -14,7 +14,7 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 ### Entry point and configuration
 
-- `main.cpp` (268 lines) — `int main(argc, argv)`. Parses args via `g.parse_args`, sets up the timer set, reads the reference FASTA and the two VCFs into `variantData` instances, then drives the comparison pipeline: cluster → supercluster → precision/recall → optional edit distance → phase → write.
+- `main.cpp` (292 lines) — `int main(argc, argv)`. Parses args via `g.parse_args`, sets up the timer set, reads the reference FASTA and the two VCFs into `variantData` instances, then drives the comparison pipeline: cluster → supercluster → precision/recall → optional edit distance → phase → write.
 - `globals.h` / `globals.cpp` (655 lines) — declares `class Globals` and the program-wide instance `extern Globals g;` (defined in `main.cpp`). `Globals::parse_args` is ~491 of the 655 lines — `globals.cpp` is overwhelmingly CLI handling, not stateful logic. The actual configuration surface (`Globals` member fields) is one screen of defaults in `globals.h`.
 - `defs.h` — shared constants, type tags, and the `INFO`/`WARN`/`ERROR` logging macros used throughout the codebase.
 
@@ -22,14 +22,14 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 - `variant.h` / `variant.cpp` (1004 lines) — `ctgVariants` (per-contig, parallel arrays of variant fields) and `variantData` (top-level VCF holder: `variants[hap][ctg] -> shared_ptr<ctgVariants>`). The `variantData` constructor reads a VCF via HTSlib; `write_vcf` and `left_shift` are the other large methods.
 - `bed.h` / `bed.cpp` (288 lines) — `bedData` and `contigRegions`. Parses the optional `-b` BED and answers in/out-of-region queries.
-- `fasta.h` (header-only) — `fastaData`. Holds reference sequence strings and contig lengths. When a BED is provided, `main.cpp` passes the BED contig list so `fastaData` can load only those contigs through an existing HTSlib `.fai` index; if the index is absent it falls back to kseq streaming filtered to the requested contigs. Without a BED, it keeps the previous full-reference streaming behavior. The object is held as `std::shared_ptr<fastaData>` and threaded through everything that needs reference sequence.
-- `cluster.h` / `cluster.cpp` (1263 lines) — `ctgSuperclusters` and `superclusterData`. Groups variants into clusters (per haplotype) and then into superclusters (cross-haplotype regions that must be evaluated together). The main clustering entry points are `simple_cluster(...)`, `wf_swg_cluster(...)`, and `superclusterData::supercluster(...)`; the rest is the BiWFA-driven realignment path selected by `--cluster biwfa`.
+- `fasta.h` (header-only) — `fastaData`. Holds reference sequence strings and contig lengths. When a BED is provided, `main.cpp` passes the BED contig list so `fastaData` can load only those contigs through an existing HTSlib `.fai` index; if the index is absent it falls back to kseq streaming filtered to the requested contigs. Without a BED, `main.cpp` parses query/truth headers and records first, builds the ordered union of observed query then truth contigs, and loads only those reference contigs before validation/writing; empty no-record runs fall back to full-reference loading. The object is held as `std::shared_ptr<fastaData>` and threaded through everything that needs reference sequence.
+- `cluster.h` / `cluster.cpp` (1285 lines) — `ctgSuperclusters` and `superclusterData`. Groups variants into clusters (per haplotype) and then into superclusters (cross-haplotype regions that must be evaluated together). The main clustering entry points are `simple_cluster(...)`, `wf_swg_cluster(...)`, and `superclusterData::supercluster(...)`; the rest is the BiWFA-driven realignment path selected by `--cluster biwfa`.
 - `phase.h` / `phase.cpp` (626 lines) — `ctgPhaseblocks`, `phaseblockData`, and the phase-block analysis that runs after precision/recall.
 - `edit.h` / `edit.cpp` (280 lines) — `editData` and the edit-distance summary across the comparison.
 
 ### Algorithms
 
-- `dist.cpp` (2757 lines) — the bulk of the comparison logic, including:
+- `dist.cpp` (2867 lines) — the bulk of the comparison logic, including:
   - `precision_recall_threads_wrapper` and `precision_recall_wrapper`: the multithreaded driver over superclusters.
   - `edits_wrapper`: edit-distance summarization.
   - `count_dist`, the BiWFA distance routines, and the wave/queue helpers (`contains(...)` etc.).
@@ -49,15 +49,15 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 `main()` runs the pipeline sequentially:
 
-1. **Read** — `fastaData` (reference; BED-scoped when `-b/--bed` is present), `variantData` (query), `variantData` (truth).
-2. **Cluster** — variants are clustered per haplotype, then superclustered across haplotypes (`cluster.cpp`).
+1. **Read** — `fastaData` (reference; BED-scoped when `-b/--bed` is present; otherwise loaded after query/truth parsing from the ordered union of observed input contigs), `variantData` (query), `variantData` (truth).
+2. **Cluster** — variants are clustered per haplotype, then superclustered across haplotypes (`cluster.cpp`). BiWFA clustering launches outer haplotype/contig tasks and, when few outer tasks exist, assigns bounded inner workers to active-cluster reach computation while preserving serial merge/order behavior.
 3. **Realign** (optional, gated by `--realign-query` / `--realign-truth`) — left-shifts and re-emits the input VCFs.
-4. **Precision / recall** — `precision_recall_threads_wrapper` in `dist.cpp` partitions superclusters across threads and computes TP/FP/FN with credit via BiWFA.
+4. **Precision / recall** — `precision_recall_threads_wrapper` in `dist.cpp` partitions superclusters across threads and computes TP/FP/FN with credit via BiWFA. Large memory groups run the four independent query/truth haplotype alignments in parallel; very large superclusters in the lowest memory group can also reserve a small global budget of nested alignment workers based on the existing RAM-step estimate.
 5. **Edit distance** (optional, gated by `--distance`) — `edits_wrapper` in `dist.cpp` summarizes edit distance across the comparison and writes distance reports.
 6. **Phase analysis** — `phaseblockData` in `phase.cpp` annotates phase blocks and switch/flip errors.
 7. **Write** — `print.cpp` emits the report TSVs and (if applicable) the rewritten VCFs.
 
-The pipeline is single-process. Parallelism is per-supercluster inside step 4 only (see `dist.cpp::precision_recall_threads_wrapper`).
+The pipeline is single-process. Parallelism exists in BiWFA clustering/reclustering and precision/recall. `main.cpp` bounds clustering inner workers by available outer haplotype/contig tasks, and `dist.cpp::precision_recall_threads_wrapper` bounds nested precision/recall alignment workers with a global atomic budget.
 
 ## Dependency graph (from Makefile)
 
@@ -79,18 +79,18 @@ phase.o      : phase.cpp   phase.h   cluster.h print.h globals.h defs.h variant.
 
 | File | Lines | Role |
 |---|---:|---|
-| `dist.cpp` | 2757 | precision/recall, edit distance, BiWFA, threading |
-| `cluster.cpp` | 1263 | clustering and superclustering |
+| `dist.cpp` | 2867 | precision/recall, edit distance, BiWFA, threading |
+| `cluster.cpp` | 1285 | clustering and superclustering |
 | `variant.cpp` | 1004 | VCF read/write, `ctgVariants`/`variantData` |
 | `print.cpp` | 905 | all reporting and INFO output |
 | `globals.cpp` | 655 | mostly CLI parsing (`parse_args` ≈ 491 lines) |
 | `phase.cpp` | 626 | phase-block analysis |
 | `bed.cpp` | 288 | BED region handling |
 | `edit.cpp` | 280 | edit-distance summary |
-| `main.cpp` | 268 | pipeline driver |
+| `main.cpp` | 292 | pipeline driver |
 | `timer.cpp` | 31 | timer primitives |
 
-Total: ~9k lines across `src/`.
+Total: ~9.2k lines across `src/`.
 
 ## Known structural tensions
 

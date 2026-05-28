@@ -359,6 +359,98 @@
         "The largest improvement comes from removing full GRCh38 eager reference loading on BED-scoped runs; 64-thread reading time dropped from roughly 16 seconds during discovery to sub-second in the optimized run.",
         "The chr22 fixture is now short enough that final high-core scaling claims still need a larger tier, per measurement policy."
       ]
+    },
+    {
+      "name": "chr2_lazy_reference_cluster_pr_threading",
+      "slice_class": "optimization",
+      "status": "passed",
+      "base_commit": "46b7c83 chore: add chr2 scaling fixture",
+      "commits": [
+        "cc678bd perf: reduce chr2 fixture runtime",
+        "3ae380d perf: parallelize large precision-recall alignments"
+      ],
+      "branch": "master",
+      "benchmark": "HG00733_chr2_35950000_45090000",
+      "summary": "For no-BED subset inputs, parse query/truth first and load only observed reference contigs; add bounded inner active-cluster reach workers for BiWFA clustering/reclustering; remove precision/recall selector/pointer allocation copies; and allow very large lowest-memory precision/recall superclusters to reserve a small global budget of nested alignment workers. Output metrics and output files are unchanged for the recorded 64-thread fixture runs.",
+      "correctness_gate": {
+        "command": "git diff --check && make -C src -j24 && bash demo/regression.sh",
+        "verdict": "PASS",
+        "log": "demo regression stdout: PASS demo regression: superclusters=6037, ALL_TP=9096, ALL_FN=52, ALL_FP=14, switch_errors=3, flip_errors=13"
+      },
+      "validation_tool": "tools/compare_vcfdist_runs.py",
+      "branch_runs": [
+        {
+          "threads": 64,
+          "baseline_wall_clock": "1:53.54",
+          "branch_wall_clock": "1:11.79",
+          "speedup_vs_baseline": 1.582,
+          "baseline_max_rss_kb": 3559284,
+          "branch_max_rss_kb": 3584256,
+          "rss_ratio_vs_baseline": 1.007,
+          "baseline_artifact_dir": "out/opencode-runtime/active_goal_baseline_threads_64",
+          "branch_artifact_dir": "out/opencode-runtime/active_goal_cluster_threads_64",
+          "validation_command": "python3 tools/compare_vcfdist_runs.py out/opencode-runtime/active_goal_baseline_threads_64 out/opencode-runtime/active_goal_cluster_threads_64 --prefix vcfdist.",
+          "output_diff_verdict": "PASS",
+          "genotyping_switch_flip_error_verdict": "PASS",
+          "timers_seconds": {
+            "reading": 2.136,
+            "clustering": 7.645,
+            "realigning": 6.019,
+            "reclustering": 7.427,
+            "precision_recall": 48.377,
+            "total": 71.739
+          }
+        },
+        {
+          "threads": 64,
+          "baseline_wall_clock": "1:53.54",
+          "branch_wall_clock": "0:48.21",
+          "speedup_vs_baseline": 2.355,
+          "baseline_max_rss_kb": 3559284,
+          "branch_max_rss_kb": 4091272,
+          "rss_ratio_vs_baseline": 1.149,
+          "baseline_artifact_dir": "out/opencode-runtime/active_goal_baseline_threads_64",
+          "branch_artifact_dir": "out/opencode-runtime/active_goal_prnested_derived_threads_64",
+          "validation_command": "python3 tools/compare_vcfdist_runs.py out/opencode-runtime/active_goal_baseline_threads_64 out/opencode-runtime/active_goal_prnested_derived_threads_64 --prefix vcfdist.",
+          "output_diff_verdict": "PASS",
+          "genotyping_switch_flip_error_verdict": "PASS",
+          "timers_seconds": {
+            "reading": 2.141,
+            "clustering": 7.693,
+            "realigning": 5.833,
+            "reclustering": 7.590,
+            "precision_recall": 24.570,
+            "total": 47.959
+          }
+        }
+      ],
+      "repeat_runs": [
+        {
+          "artifact_dir": "out/opencode-runtime/active_goal_prnested_threads_64",
+          "wall_clock": "0:51.40",
+          "max_rss_kb": 4120580,
+          "precision_recall_seconds": 27.648,
+          "output_diff_verdict": "PASS"
+        },
+        {
+          "artifact_dir": "out/opencode-runtime/active_goal_prnested_threads_64_repeat2",
+          "wall_clock": "0:51.32",
+          "max_rss_kb": 4181152,
+          "precision_recall_seconds": 27.778,
+          "output_diff_verdict": "PASS"
+        },
+        {
+          "artifact_dir": "out/opencode-runtime/active_goal_prnested_threads_64_repeat3",
+          "wall_clock": "0:50.87",
+          "max_rss_kb": 4057012,
+          "precision_recall_seconds": 26.568,
+          "output_diff_verdict": "PASS"
+        }
+      ],
+      "notes": [
+        "The final derived-threshold run reduced wall clock from 113.54s to 48.21s, exceeding the 2.0x active-goal target while preserving all compared outputs.",
+        "Peak RSS increased by roughly 0.5GB relative to the active baseline because nested precision/recall alignment workers can make several large superclusters progress concurrently."
+      ]
     }
   ],
   "open_measurement_gaps": [

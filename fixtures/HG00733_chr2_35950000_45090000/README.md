@@ -39,7 +39,9 @@ and adds nearby high-cost superclusters near:
 
 The fixture exercises:
 
-- full-reference FASTA loading with pre-subset BCF inputs;
+- no-BED reference-loading behavior with pre-subset BCF inputs (full-reference
+  streaming in the archived baseline; observed-contig loading in optimized
+  builds);
 - `biwfa` clustering/reclustering and realignment;
 - precision/recall work that can be distributed across multiple costly
   superclusters;
@@ -95,6 +97,23 @@ Each run matched the archived fixture outputs. Validation logs are stored as
 improvement confirms that this fixture exposes parallel precision/recall work;
 8, 32, and 64 threads are similar because only a small number of superclusters
 dominate this window.
+
+## Optimized 64-thread Reference Run
+
+The 2026-05-27 runtime slice (`cc678bd` plus `3ae380d`) preserved the command and
+all output metrics while changing internal reference loading and bounded
+clustering/precision-recall threading. The final validation run is stored under
+`out/opencode-runtime/active_goal_prnested_derived_threads_64/` and compares
+cleanly against `out/opencode-runtime/active_goal_baseline_threads_64/` with
+`tools/compare_vcfdist_runs.py`.
+
+| Commit(s) | Threads | Wall clock | User s | System s | CPU | Max RSS KB | Read timer s | Cluster timer s | Recluster timer s | PR timer s |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| active baseline | 64 | 1:53.54 | 240.61 | 17.34 | 227% | 3559284 | 21.974 | 19.015 | 18.238 | 48.103 |
+| `cc678bd` + `3ae380d` | 64 | 0:48.21 | 215.14 | 26.75 | 501% | 4091272 | 2.141 | 7.693 | 7.590 | 24.570 |
+
+This is a `2.355x` wall-clock speedup for the 64-thread fixture run, with max RSS
+increasing to `1.149x` of the active baseline.
 
 ## Expected Results
 
