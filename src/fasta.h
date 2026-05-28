@@ -18,11 +18,22 @@ KSEQ_INIT(int, read);
 
 class fastaData {
 public:
+    fastaData() = default;
+
     fastaData(FILE * ref_fasta_fp) { this->load_from_stream(ref_fasta_fp); }
 
     fastaData(
             const std::string & ref_fasta_fn,
             const std::vector<std::string> & contigs_to_load = {}) {
+        this->load(ref_fasta_fn, contigs_to_load);
+    }
+
+    void load(
+            const std::string & ref_fasta_fn,
+            const std::vector<std::string> & contigs_to_load = {}) {
+        this->fasta.clear();
+        this->lengths.clear();
+
         if (!contigs_to_load.empty()) {
             if (this->load_from_index(ref_fasta_fn, contigs_to_load)) return;
         }

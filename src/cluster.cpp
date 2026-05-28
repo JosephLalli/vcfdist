@@ -1,6 +1,8 @@
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "globals.h"
@@ -952,16 +954,14 @@ void simple_cluster(std::shared_ptr<variantData> vcf, int callset) {
  * all variant calls are true positives (doesn't allow skipping)
  */
 void wf_swg_cluster(variantData * vcf, int ctg_idx, 
-        int hap, int sub, int open, int extend) {
+        int hap, int sub, int open, int extend, int inner_threads) {
     bool print = false;
 	std::string ctg = vcf->contigs[ctg_idx];
 
-    // allocate this memory once, use on each cluster
-    std::vector<int> offs_buffer(MATS * g.max_size*2 * 
-            std::max(sub, open+extend), -2);
-
     std::shared_ptr<ctgVariants> vars = vcf->variants[hap][ctg];
     if (!vars->n) return;
+    inner_threads = std::max(1, inner_threads);
+    const std::string & ref_seq = vcf->ref->fasta.at(ctg);
 
     // mark variant boundary between clusters (hence n+1), 
     // and whether it was active on the previous iteration.
@@ -983,10 +983,11 @@ void wf_swg_cluster(variantData * vcf, int ctg_idx,
         if (iter > g.max_cluster_itrs) break;
         /* if (print) printf("Iteration %d\n", iter); */
 
-        // count clusters currently being expanded
-        int active = 0;
+        // list clusters currently being expanded
+        std::vector<size_t> active_clusters;
+        active_clusters.reserve(prev_active.size());
         for (size_t i = 0; i < prev_active.size()-1; i++) {
-            if (prev_active[i]) active++;
+            if (prev_active[i]) active_clusters.push_back(i);
         }
 
         // save temp clustering (generate_str assumes clustered)
@@ -996,12 +997,12 @@ void wf_swg_cluster(variantData * vcf, int ctg_idx,
         left_reach[prev_clusters.size()-1] = std::numeric_limits<int>::max();
         right_reach[prev_clusters.size()-1] = std::numeric_limits<int>::max();
 
-        // update all cluster reaches
-        for (size_t clust = 0; clust < prev_clusters.size(); clust++) {
+        // update all active cluster reaches
+        auto update_reach = [&](size_t clust, std::vector<int> & offs_buffer) {
 
             // only compute necessary reaches (adjacent merge)
-            bool left_compute = prev_active[clust];
-            bool right_compute = prev_active[clust];
+            bool left_compute = true;
+            bool right_compute = true;
 
             // no left cluster, or sentinel
             if (clust == prev_clusters.size()-1) {
@@ -1038,8 +1039,9 @@ void wf_swg_cluster(variantData * vcf, int ctg_idx,
                 int end_idx = vars->clusters[clust+1];
                 int beg = std::max(0, vars->poss[beg_idx] - 1);
                 int end = std::min(vcf->lengths[ctg_idx], vars->poss[end_idx-1] + vars->rlens[end_idx-1] + 1);
-                std::string query = generate_str(vcf->ref, vars, ctg, beg_idx, end_idx, beg, end);
-                std::string ref = vcf->ref->fasta.at(ctg).substr(beg, end-beg);
+                std::string query = generate_str(ref_seq, vars, ctg, beg_idx, end_idx, beg, end);
+                std::string ref;
+                ref.assign(ref_seq, beg, end-beg);
                 std::vector< std::vector< std::vector<uint8_t> > > ptrs(MATS);
                 std::vector< std::vector< std::vector<int> > > offs(MATS);
                 wf_swg_align(query, ref, ptrs, offs, score, sub, open, extend, false);
@@ -1069,11 +1071,11 @@ void wf_swg_cluster(variantData * vcf, int ctg_idx,
                 while (reach == ref_len-1) { // iterative doubling
                     ref_len *= 2;
                     beg_pos = std::max(0, end_pos - ref_len - std::abs(main_diag) - score/extend - 3); // ensure query is longer
-                    query = generate_str(vcf->ref, vars, ctg, 
+                    query = generate_str(ref_seq, vars, ctg,
                                 vars->clusters[clust], 
                                 vars->clusters[clust+1], 
                                 beg_pos, end_pos);
-                    ref = vcf->ref->fasta.at(ctg).substr(std::max(0, end_pos-ref_len), ref_len);
+                    ref.assign(ref_seq, std::max(0, end_pos-ref_len), ref_len);
                     std::reverse(query.begin(), query.end());
                     std::reverse(ref.begin(), ref.end());
                     // manage buffer for storing offsets
@@ -1132,11 +1134,11 @@ void wf_swg_cluster(variantData * vcf, int ctg_idx,
                     ref_len *= 2;
                     end_pos = std::min(vcf->lengths[ctg_idx], 
 							beg_pos + ref_len + std::abs(main_diag) + score/extend + 3);
-                    query = generate_str(vcf->ref, vars, ctg, 
+                    query = generate_str(ref_seq, vars, ctg,
                                 vars->clusters[clust], 
                                 vars->clusters[clust+1], 
                                 beg_pos, end_pos);
-                    ref = vcf->ref->fasta.at(ctg).substr(beg_pos, std::min(ref_len, end_pos - beg_pos));
+                    ref.assign(ref_seq, beg_pos, std::min(ref_len, end_pos - beg_pos));
                     // manage buffer for storing offsets
                     size_t offs_size = MATS * (std::max(sub, open+extend)+1) * 
                         (query.size() + ref.size() - 1);
@@ -1171,6 +1173,26 @@ void wf_swg_cluster(variantData * vcf, int ctg_idx,
                         l_reach == std::numeric_limits<int>::max() ? 
                             "X" : std::to_string(l_reach).data(), 
                         r_reach == std::numeric_limits<int>::max() ? "X" : std::to_string(r_reach).data());
+        };
+
+        int worker_count = print ? 1 : std::min(inner_threads, int(active_clusters.size()));
+        if (worker_count <= 1) {
+            std::vector<int> offs_buffer;
+            for (size_t clust : active_clusters) update_reach(clust, offs_buffer);
+        } else {
+            std::atomic<size_t> next_active(0);
+            std::vector<std::thread> threads;
+            for (int t = 0; t < worker_count; t++) {
+                threads.push_back(std::thread([&]() {
+                    std::vector<int> offs_buffer;
+                    while (true) {
+                        size_t active_idx = next_active.fetch_add(1);
+                        if (active_idx >= active_clusters.size()) break;
+                        update_reach(active_clusters[active_idx], offs_buffer);
+                    }
+                }));
+            }
+            for (std::thread & thread : threads) thread.join();
         }
 
         // merge dependent clusters rightwards

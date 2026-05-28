@@ -21,6 +21,15 @@ inline bool contains(const std::unordered_map<T,U> & wave, const T & idx) {
     return wave.find(idx) != wave.end();
 }
 
+template <typename T>
+struct RefList4 {
+    const T* v[4];
+
+    const T& operator[](size_t i) const {
+        return *v[i];
+    }
+};
+
 /******************************************************************************/
 
 
@@ -84,8 +93,25 @@ std::string generate_str(
         int beg_idx, int end_idx, int beg_pos, int end_pos, 
         int min_qual /* = 0 */) {
 
+    try {
+        return generate_str(ref->fasta.at(ctg), vars, ctg,
+                beg_idx, end_idx, beg_pos, end_pos, min_qual);
+    } catch (const std::out_of_range & e) {
+        ERROR("Contig '%s' not in reference FASTA or position out of range (generate_str)", ctg.data());
+    }
+    return "";
+}
+
+
+std::string generate_str(
+        const std::string & ref_seq,
+        std::shared_ptr<ctgVariants> vars, const std::string & ctg,
+        int beg_idx, int end_idx, int beg_pos, int end_pos,
+        int min_qual /* = 0 */) {
+
     int var_idx = beg_idx;
     std::string str = "";
+    str.reserve(std::max(0, end_pos - beg_pos));
     while (var_idx < vars->n && vars->poss[var_idx] < beg_pos) var_idx++;
     for (int ref_pos = beg_pos; ref_pos < end_pos; ) {
 
@@ -125,7 +151,7 @@ std::string generate_str(
                     }
                     ERROR("No variant, but ref_end < ref_pos (generate_str)");
                 }
-                str += ref->fasta.at(ctg).substr(ref_pos, ref_end-ref_pos);
+                str.append(ref_seq, ref_pos, ref_end-ref_pos);
                 ref_pos = ref_end;
             } catch (const std::out_of_range & e) {
                 ERROR("Contig '%s' not in reference FASTA or position out of range (generate_str)", ctg.data());
@@ -156,6 +182,20 @@ void generate_ptrs_strs(
     // generate query and ref strings and pointers
     query_ptrs.resize(PTR_DIMS);
     ref_ptrs.resize(PTR_DIMS);
+    const std::string * ref_seq_ptr = NULL;
+    try {
+        ref_seq_ptr = &ref->fasta.at(ctg);
+    } catch (const std::out_of_range & e) {
+        ERROR("Contig '%s' not present in reference FASTA", ctg.data());
+    }
+    const std::string & ref_seq = *ref_seq_ptr;
+    int ref_region_len = std::max(0, end_pos - beg_pos + 1);
+    query_str.reserve(query_str.size() + ref_region_len);
+    ref_str.reserve(ref_str.size() + ref_region_len);
+    for (int dim = 0; dim < PTR_DIMS; dim++) {
+        query_ptrs[dim].reserve(query_ptrs[dim].size() + ref_region_len);
+        ref_ptrs[dim].reserve(ref_ptrs[dim].size() + ref_region_len);
+    }
     int query_var_idx = query_vars->clusters.size() ? 
             query_vars->clusters[query_clust_beg_idx] : 0;
     int query_end_idx = query_vars->clusters.size() ? 
@@ -210,28 +250,25 @@ void generate_ptrs_strs(
                 int ref_end = (query_var_idx < query_end_idx) ?
                     query_vars->poss[query_var_idx] : end_pos+1;
 
+                int match_len = ref_end - ref_pos;
+                int ref_start = ref_str.size();
+                int query_start = query_str.size();
+
                 // add pointers, query
-                std::vector<int> new_query_ptrs(ref_end - ref_pos, 0);
-                query_ptrs[FLAGS].insert(query_ptrs[FLAGS].end(),
-                        new_query_ptrs.begin(), new_query_ptrs.end()); // zeros
-                for(size_t i = 0; i < new_query_ptrs.size(); i++)
-                    new_query_ptrs[i] = ref_str.size() + i;
-                query_ptrs[PTRS].insert(query_ptrs[PTRS].end(), 
-                        new_query_ptrs.begin(), new_query_ptrs.end());
+                query_ptrs[FLAGS].insert(query_ptrs[FLAGS].end(), match_len, 0);
+                query_ptrs[PTRS].reserve(query_ptrs[PTRS].size() + match_len);
+                for (int i = 0; i < match_len; i++)
+                    query_ptrs[PTRS].push_back(ref_start + i);
 
                 // add pointers, ref
-                std::vector<int> new_ref_ptrs(ref_end - ref_pos, 0);
-                ref_ptrs[FLAGS].insert(ref_ptrs[FLAGS].end(),
-                        new_ref_ptrs.begin(), new_ref_ptrs.end()); // zeros
-                for(size_t i = 0; i < new_ref_ptrs.size(); i++)
-                    new_ref_ptrs[i] = query_str.size() + i;
-                ref_ptrs[PTRS].insert(ref_ptrs[PTRS].end(), 
-                        new_ref_ptrs.begin(), new_ref_ptrs.end());
+                ref_ptrs[FLAGS].insert(ref_ptrs[FLAGS].end(), match_len, 0);
+                ref_ptrs[PTRS].reserve(ref_ptrs[PTRS].size() + match_len);
+                for (int i = 0; i < match_len; i++)
+                    ref_ptrs[PTRS].push_back(query_start + i);
 
                 // add sequence, update positions
-                std::string matches = ref->fasta.at(ctg).substr(ref_pos, ref_end-ref_pos);
-                query_str += matches;
-                ref_str += matches;
+                query_str.append(ref_seq, ref_pos, match_len);
+                ref_str.append(ref_seq, ref_pos, match_len);
                 ref_pos = ref_end;
 
             } catch (const std::out_of_range & e) {
@@ -267,17 +304,17 @@ void calc_prec_recall_aln(
     
     // set loop variables
     int ref_len = ref.size();
-    std::vector<std::string> query {query1, query1, query2, query2};
-    std::vector<std::string> truth {truth1, truth2, truth1, truth2};
-    std::vector< std::vector< std::vector<int> > > query_ref_ptrs {
-            query1_ref_ptrs, query1_ref_ptrs, query2_ref_ptrs, query2_ref_ptrs };
-    std::vector< std::vector< std::vector<int> > > truth_ref_ptrs {
-            truth1_ref_ptrs, truth2_ref_ptrs, truth1_ref_ptrs, truth2_ref_ptrs };
-    std::vector< std::vector< std::vector<int> > > ref_query_ptrs {
-            ref_query1_ptrs, ref_query1_ptrs, ref_query2_ptrs, ref_query2_ptrs };
-    std::vector<int> query_lens = 
+    RefList4<std::string> query {{&query1, &query1, &query2, &query2}};
+    RefList4<std::string> truth {{&truth1, &truth2, &truth1, &truth2}};
+    RefList4< std::vector< std::vector<int> > > query_ref_ptrs {{
+            &query1_ref_ptrs, &query1_ref_ptrs, &query2_ref_ptrs, &query2_ref_ptrs }};
+    RefList4< std::vector< std::vector<int> > > truth_ref_ptrs {{
+            &truth1_ref_ptrs, &truth2_ref_ptrs, &truth1_ref_ptrs, &truth2_ref_ptrs }};
+    RefList4< std::vector< std::vector<int> > > ref_query_ptrs {{
+            &ref_query1_ptrs, &ref_query1_ptrs, &ref_query2_ptrs, &ref_query2_ptrs }};
+    int query_lens[4] =
             {int(query1.size()), int(query1.size()), int(query2.size()), int(query2.size())};
-    std::vector<int> truth_lens = 
+    int truth_lens[4] =
             {int(truth1.size()), int(truth2.size()), int(truth1.size()), int(truth2.size())};
 
     std::vector< std::vector< std::vector<bool> > > done;
@@ -503,14 +540,14 @@ void calc_prec_recall_path(
         const std::vector<int> & pr_query_ref_end, bool print
         ) {
 
-    std::vector<std::string> query = {query1, query1, query2, query2};
-    std::vector<std::string> truth = {truth1, truth2, truth1, truth2};
-    std::vector< std::vector< std::vector<int> > > query_ref_ptrs = { 
-            query1_ref_ptrs, query1_ref_ptrs, query2_ref_ptrs, query2_ref_ptrs };
-    std::vector< std::vector< std::vector<int> > > ref_query_ptrs = { 
-            ref_query1_ptrs, ref_query1_ptrs, ref_query2_ptrs, ref_query2_ptrs };
-    std::vector< std::vector< std::vector<int> > > truth_ref_ptrs = { 
-            truth1_ref_ptrs, truth2_ref_ptrs, truth1_ref_ptrs, truth2_ref_ptrs };
+    RefList4<std::string> query {{&query1, &query1, &query2, &query2}};
+    RefList4<std::string> truth {{&truth1, &truth2, &truth1, &truth2}};
+    RefList4< std::vector< std::vector<int> > > query_ref_ptrs {{
+            &query1_ref_ptrs, &query1_ref_ptrs, &query2_ref_ptrs, &query2_ref_ptrs }};
+    RefList4< std::vector< std::vector<int> > > ref_query_ptrs {{
+            &ref_query1_ptrs, &ref_query1_ptrs, &ref_query2_ptrs, &ref_query2_ptrs }};
+    RefList4< std::vector< std::vector<int> > > truth_ref_ptrs {{
+            &truth1_ref_ptrs, &truth2_ref_ptrs, &truth1_ref_ptrs, &truth2_ref_ptrs }};
     std::vector<int> pr_query_ref_beg(CALLSETS*HAPS);
     std::vector< std::vector< std::vector<bool> > > done;
 
@@ -855,12 +892,12 @@ void get_prec_recall_path_sync(
         ) {
 
     // query <-> ref pointers
-    std::vector< std::vector< std::vector<int> > > query_ref_ptrs = { 
-            query1_ref_ptrs, query1_ref_ptrs, query2_ref_ptrs, query2_ref_ptrs };
-    std::vector< std::vector< std::vector<int> > > truth_ref_ptrs = { 
-            truth1_ref_ptrs, truth2_ref_ptrs, truth1_ref_ptrs, truth2_ref_ptrs };
-    std::vector< std::vector< std::vector<int> > > ref_query_ptrs = { 
-            ref_query1_ptrs, ref_query1_ptrs, ref_query2_ptrs, ref_query2_ptrs };
+    RefList4< std::vector< std::vector<int> > > query_ref_ptrs {{
+            &query1_ref_ptrs, &query1_ref_ptrs, &query2_ref_ptrs, &query2_ref_ptrs }};
+    RefList4< std::vector< std::vector<int> > > truth_ref_ptrs {{
+            &truth1_ref_ptrs, &truth2_ref_ptrs, &truth1_ref_ptrs, &truth2_ref_ptrs }};
+    RefList4< std::vector< std::vector<int> > > ref_query_ptrs {{
+            &ref_query1_ptrs, &ref_query1_ptrs, &ref_query2_ptrs, &ref_query2_ptrs }};
 
     for (int i = 0; i < CALLSETS*HAPS; i++) {
         /* printf("\nBKWD %s path\n", aln_strs[i].data()); */
@@ -1022,14 +1059,14 @@ void calc_prec_recall(
 
     // set query/truth strings and pointers
     int beg = clusterdata_ptr->superclusters[ctg]->begs[sc_idx];
-    std::vector<std::string> query = {query1, query1, query2, query2};
-    std::vector<std::string> truth = {truth1, truth2, truth1, truth2};
-    std::vector< std::vector< std::vector<int> > > query_ref_ptrs = { 
-            query1_ref_ptrs, query1_ref_ptrs, query2_ref_ptrs, query2_ref_ptrs };
-    std::vector< std::vector< std::vector<int> > > ref_query_ptrs = { 
-            ref_query1_ptrs, ref_query1_ptrs, ref_query2_ptrs, ref_query2_ptrs };
-    std::vector< std::vector< std::vector<int> > > truth_ref_ptrs = { 
-            truth1_ref_ptrs, truth2_ref_ptrs, truth1_ref_ptrs, truth2_ref_ptrs };
+    RefList4<std::string> query {{&query1, &query1, &query2, &query2}};
+    RefList4<std::string> truth {{&truth1, &truth2, &truth1, &truth2}};
+    RefList4< std::vector< std::vector<int> > > query_ref_ptrs {{
+            &query1_ref_ptrs, &query1_ref_ptrs, &query2_ref_ptrs, &query2_ref_ptrs }};
+    RefList4< std::vector< std::vector<int> > > ref_query_ptrs {{
+            &ref_query1_ptrs, &ref_query1_ptrs, &ref_query2_ptrs, &ref_query2_ptrs }};
+    RefList4< std::vector< std::vector<int> > > truth_ref_ptrs {{
+            &truth1_ref_ptrs, &truth2_ref_ptrs, &truth1_ref_ptrs, &truth2_ref_ptrs }};
 
     // for only the selected phasing
     for (int i = 0; i < CALLSETS*HAPS; i++) {

@@ -65,7 +65,7 @@ public:
 // for single haplotype clustering (one VCF)
 void simple_cluster(std::shared_ptr<variantData> vcf, int callset);
 void wf_swg_cluster(variantData * vcf, int ctg_idx, int hap,
-        int sub, int open, int extend);
+        int sub, int open, int extend, int inner_threads = 1);
 std::vector< std::vector< std::vector<int> > > 
         sort_superclusters(std::shared_ptr<superclusterData>);
 

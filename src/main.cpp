@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <thread>
 
 #include "variant.h"
@@ -24,6 +25,12 @@ std::vector<std::string> phase_strs = {"=", "X", "?"};
 std::vector<std::string> timer_strs = {"reading", "clustering", "realigning", 
     "reclustering", "superclustering", "precision/recall", "edit distance", "phasing", "writing", "total"};
 std::vector<std::string> switch_strs = {"FLIP", "SWITCH", "SWITCH+FLIP", "SWITCH_ERR", "FLIP_BEG", "FLIP_END", "NONE"};
+
+static int cluster_inner_threads(size_t contig_count) {
+    int outer_tasks = std::min(HAPS * int(contig_count), g.max_threads);
+    if (outer_tasks < 1) return 1;
+    return std::max(1, g.max_threads / outer_tasks);
+}
  
 int main(int argc, char **argv) {
 
@@ -38,15 +45,26 @@ int main(int argc, char **argv) {
     // parse reference fasta
     g.timers[TIME_TOTAL].start();
     g.timers[TIME_READ].start();
-    std::vector<std::string> ref_contigs;
-    if (g.bed_exists) ref_contigs = g.bed.contigs;
-    std::shared_ptr<fastaData> ref_ptr(new fastaData(g.ref_fasta_fn, ref_contigs));
+    std::shared_ptr<fastaData> ref_ptr(new fastaData());
+    if (g.bed_exists) ref_ptr->load(g.ref_fasta_fn, g.bed.contigs);
 
     // parse query and truth VCFs
     std::shared_ptr<variantData> query_ptr(
             new variantData(g.query_vcf_fn, ref_ptr, QUERY));
     std::shared_ptr<variantData> truth_ptr(
             new variantData(g.truth_vcf_fn, ref_ptr, TRUTH));
+    if (!g.bed_exists) {
+        std::vector<std::string> ref_contigs;
+        for (const std::string & ctg : query_ptr->contigs) {
+            if (std::find(ref_contigs.begin(), ref_contigs.end(), ctg) == ref_contigs.end())
+                ref_contigs.push_back(ctg);
+        }
+        for (const std::string & ctg : truth_ptr->contigs) {
+            if (std::find(ref_contigs.begin(), ref_contigs.end(), ctg) == ref_contigs.end())
+                ref_contigs.push_back(ctg);
+        }
+        ref_ptr->load(g.ref_fasta_fn, ref_contigs);
+    }
     g.timers[TIME_READ].stop();
 
     // write results
@@ -80,10 +98,11 @@ int main(int argc, char **argv) {
                     COLOR_PURPLE, callset_strs[QUERY].data(), 
                     COLOR_WHITE, query_ptr->filename.data());
             std::vector<std::thread> threads;
+            int inner_threads = cluster_inner_threads(query_ptr->contigs.size());
             for (int t = 0; t < HAPS*int(query_ptr->contigs.size()); t++) {
                 threads.push_back(std::thread( wf_swg_cluster, 
                             query_ptr.get(), t/2 /* contig */, t%2, /* hap */
-                            g.sub, g.open, g.extend)); 
+                            g.sub, g.open, g.extend, inner_threads));
                 if ((t+1) % g.max_threads == 0) { // wait for thread batch to complete
                     for (std::thread & thread : threads) thread.join();
                     threads.clear();
@@ -117,10 +136,11 @@ int main(int argc, char **argv) {
                     COLOR_PURPLE, g.realign_query ? "re":"", callset_strs[QUERY].data(), 
                     COLOR_WHITE, query_ptr->filename.data());
             std::vector<std::thread> threads;
+            int inner_threads = cluster_inner_threads(query_ptr->contigs.size());
             for (int t = 0; t < HAPS*int(query_ptr->contigs.size()); t++) {
                 threads.push_back(std::thread( wf_swg_cluster, 
                             query_ptr.get(), t/2 /* contig */, t%2, /* hap */
-                            g.sub, g.open, g.extend)); 
+                            g.sub, g.open, g.extend, inner_threads));
                 if ((t+1) % g.max_threads == 0) { // wait for thread batch to complete
                     for (std::thread & thread : threads) thread.join();
                     threads.clear();
@@ -144,10 +164,11 @@ int main(int argc, char **argv) {
                     COLOR_PURPLE, callset_strs[TRUTH].data(), 
                     COLOR_WHITE, truth_ptr->filename.data());
             std::vector<std::thread> threads;
+            int inner_threads = cluster_inner_threads(truth_ptr->contigs.size());
             for (int t = 0; t < HAPS*int(truth_ptr->contigs.size()); t++) {
                 threads.push_back(std::thread( wf_swg_cluster, 
                             truth_ptr.get(), t/2 /* contig */, t%2, /* hap */
-                            g.sub, g.open, g.extend)); 
+                            g.sub, g.open, g.extend, inner_threads));
                 if ((t+1) % g.max_threads == 0) { // wait for thread batch to complete
                     for (std::thread & thread : threads) thread.join();
                     threads.clear();
@@ -191,10 +212,11 @@ int main(int argc, char **argv) {
                     COLOR_PURPLE, g.realign_truth ? "re":"", callset_strs[TRUTH].data(), 
                     COLOR_WHITE, truth_ptr->filename.data());
             std::vector<std::thread> threads;
+            int inner_threads = cluster_inner_threads(truth_ptr->contigs.size());
             for (int t = 0; t < HAPS*int(truth_ptr->contigs.size()); t++) {
                 threads.push_back(std::thread( wf_swg_cluster, 
                             truth_ptr.get(), t/2 /* contig */, t%2, /* hap */
-                            g.sub, g.open, g.extend)); 
+                            g.sub, g.open, g.extend, inner_threads));
                 if ((t+1) % g.max_threads == 0) { // wait for thread batch to complete
                     for (std::thread & thread : threads) thread.join();
                     threads.clear();

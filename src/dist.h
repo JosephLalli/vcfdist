@@ -116,6 +116,10 @@ std::string generate_str(
         std::shared_ptr<fastaData> ref, 
         std::shared_ptr<ctgVariants> vars, const std::string & ctg,
         int var_idx, int end_idx, int beg_pos, int end_pos, int min_qual=0);
+std::string generate_str(
+        const std::string & ref_seq,
+        std::shared_ptr<ctgVariants> vars, const std::string & ctg,
+        int var_idx, int end_idx, int beg_pos, int end_pos, int min_qual=0);
 
 /******************************************************************************/
 
