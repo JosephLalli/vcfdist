@@ -350,6 +350,349 @@ void generate_ptrs_strs(
 // reached this wave but not yet committed, PR_DONE means committed.
 static constexpr uint8_t PR_NEW = 0, PR_IN_WAVE = 1, PR_DONE = 2;
 
+// Cell count threshold: alignments larger than this use the WFA corridor path.
+static constexpr size_t PR_WFA_CORRIDOR_THRESHOLD = 1000000;
+
+/*
+ * WFA-corridor alignment for one (query/ref, truth) alignment triplet.
+ *
+ * Phase 1: WFA diagonal-offset sweep discovers the optimal edit distance and
+ *   builds two flat corridor sets (one per space: QUERY and REF).  A diagonal
+ *   d = qri - ti is added to the corridor when any cell on that diagonal is
+ *   reached by the WFA sweep.  The corridor is grown monotonically across all
+ *   score levels so it is a superset of all diagonals reachable on any
+ *   optimal path.
+ *
+ * Phase 2: Corridor-bounded BFS fills ptrs and swap_pred_map using the same
+ *   logic as the main BFS but only enqueues cells whose diagonal is inside the
+ *   corridor.  This is correct because the corridor is a superset of the
+ *   diagonals explored by any optimal path.
+ *
+ * Correctness invariant: no optimal-path cell is excluded because the corridor
+ *   is built from WFA which is guaranteed to find the shortest path.  The BFS
+ *   may also fill some extra non-optimal cells (within the corridor), which is
+ *   harmless for the backtracker.
+ */
+static void calc_prec_recall_aln_one_wfa(
+        int i,
+        const RefList4<std::string> & query,
+        const RefList4<std::string> & truth,
+        const std::string & ref,
+        const RefList4< std::vector< std::vector<int> > > & query_ref_ptrs,
+        const RefList4< std::vector< std::vector<int> > > & ref_query_ptrs,
+        const RefList4< std::vector< std::vector<int> > > & truth_ref_ptrs,
+        int qi, int ri,
+        int query_len, int truth_len, int ref_len,
+        int & score_out,
+        std::vector< std::vector< std::vector<uint8_t> > > & ptrs,
+        std::unordered_map<idx1, idx1> & swap_pred_map,
+        int & pr_query_ref_end
+        ) {
+
+    // -----------------------------------------------------------------------
+    // Phase 1: WFA diagonal-offset sweep to discover corridor diagonals.
+    //
+    // Diagonal: d = qri - ti.  Offset: qri (the position along qri axis).
+    // wfa_q[d] = furthest qri reached in QUERY space on diagonal d.
+    // wfa_r[d] = furthest qri reached in REF   space on diagonal d.
+    // -1 sentinel = not reached.
+    // -----------------------------------------------------------------------
+
+    std::unordered_map<int, int> wfa_q, wfa_r; // diag -> max offset
+
+    // Cumulative corridor sets (diagonals ever touched, across all scores).
+    std::unordered_set<int> corr_q, corr_r;
+
+    // Extend a match run in QUERY space from current offset along diagonal d.
+    auto extend_q = [&](int d, int off) -> int {
+        while (true) {
+            int nqri = off + 1, nti = nqri - d;
+            if (nqri < query_len && nti >= 0 && nti < truth_len &&
+                    query[i][nqri] == truth[i][nti])
+                off = nqri;
+            else break;
+        }
+        return off;
+    };
+
+    // Extend a match run in REF space from current offset along diagonal d.
+    auto extend_r = [&](int d, int off) -> int {
+        while (true) {
+            int nqri = off + 1, nti = nqri - d;
+            if (nqri < ref_len && nti >= 0 && nti < truth_len &&
+                    ref[nqri] == truth[i][nti])
+                off = nqri;
+            else break;
+        }
+        return off;
+    };
+
+    // Check swap conditions (same predicates as the main BFS).
+    auto can_swap_q_to_r = [&](int qri, int ti) -> bool {
+        return (!(query_ref_ptrs[i][FLAGS][qri] & PTR_VARIANT) ||
+                 (query_ref_ptrs[i][FLAGS][qri] & PTR_VAR_END)) &&
+               (!(truth_ref_ptrs[i][FLAGS][ti]  & PTR_VARIANT) ||
+                 (truth_ref_ptrs[i][FLAGS][ti]  & PTR_VAR_END));
+    };
+    auto can_swap_r_to_q = [&](int rqri, int ti) -> bool {
+        return (!(ref_query_ptrs[i][FLAGS][rqri] & PTR_VARIANT) ||
+                 (ref_query_ptrs[i][FLAGS][rqri] & PTR_VAR_END)) &&
+               (!(truth_ref_ptrs[i][FLAGS][ti]   & PTR_VARIANT) ||
+                 (truth_ref_ptrs[i][FLAGS][ti]   & PTR_VAR_END));
+    };
+
+    // Propagate swaps from newly-added WFA entries until no more additions.
+    // Adds resulting diagonals to new_q / new_r, and also directly to wfa_q/wfa_r.
+    auto propagate_swaps = [&](std::vector<std::pair<int,int>> & new_q,
+                               std::vector<std::pair<int,int>> & new_r) {
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            std::vector<std::pair<int,int>> added_q, added_r;
+            for (auto & [d, off] : new_q) {
+                int ti = off - d;
+                if (off < 0 || off >= query_len || ti < 0 || ti >= truth_len) continue;
+                if (!can_swap_q_to_r(off, ti)) continue;
+                int ref_pos = query_ref_ptrs[i][PTRS][off];
+                int nrqri = ref_pos + 1, nti = ti + 1;
+                if (nrqri >= ref_len || nti >= truth_len) continue;
+                if (ref[nrqri] != truth[i][nti]) continue;
+                int nd = nrqri - nti;
+                int ext = extend_r(nd, nrqri);
+                if (!wfa_r.count(nd) || wfa_r[nd] < ext) {
+                    wfa_r[nd] = ext;
+                    added_r.push_back({nd, ext});
+                    changed = true;
+                }
+            }
+            for (auto & [d, off] : new_r) {
+                int ti = off - d;
+                if (off < 0 || off >= ref_len || ti < 0 || ti >= truth_len) continue;
+                if (!can_swap_r_to_q(off, ti)) continue;
+                int qpos = ref_query_ptrs[i][PTRS][off];
+                int nqqri = qpos + 1, nti = ti + 1;
+                if (nqqri >= query_len || nti >= truth_len) continue;
+                if (query[i][nqqri] != truth[i][nti]) continue;
+                int nd = nqqri - nti;
+                int ext = extend_q(nd, nqqri);
+                if (!wfa_q.count(nd) || wfa_q[nd] < ext) {
+                    wfa_q[nd] = ext;
+                    added_q.push_back({nd, ext});
+                    changed = true;
+                }
+            }
+            for (auto & p : added_q) new_q.push_back(p);
+            for (auto & p : added_r) new_r.push_back(p);
+        }
+    };
+
+    // Helper: record all current wfa_q/wfa_r diagonals into the corridor.
+    auto record_corridor = [&]() {
+        for (auto & [d, off] : wfa_q) corr_q.insert(d);
+        for (auto & [d, off] : wfa_r) corr_r.insert(d);
+    };
+
+    // Initialize score 0: seed both spaces at (qri=0, ti=0).
+    {
+        wfa_q[0] = extend_q(0, 0);
+        wfa_r[0] = extend_r(0, 0);
+        std::vector<std::pair<int,int>> new_q{{0, wfa_q[0]}};
+        std::vector<std::pair<int,int>> new_r{{0, wfa_r[0]}};
+        propagate_swaps(new_q, new_r);
+        record_corridor();
+    }
+
+    // Termination check: QUERY done when wfa_q has diagonal dq at offset query_len-1;
+    // REF done when wfa_r has diagonal dr at offset ref_len-1.
+    int dq_end = (query_len - 1) - (truth_len - 1);
+    int dr_end = (ref_len   - 1) - (truth_len - 1);
+    auto is_done = [&]() -> bool {
+        return (wfa_q.count(dq_end) && wfa_q.at(dq_end) >= query_len - 1) ||
+               (wfa_r.count(dr_end) && wfa_r.at(dr_end) >= ref_len   - 1);
+    };
+
+    int score = 0;
+    while (!is_done()) {
+        score++;
+        // Build new frontier by advancing each entry by one edit (INS/DEL/SUB).
+        std::unordered_map<int, int> next_q = wfa_q;
+        std::unordered_map<int, int> next_r = wfa_r;
+
+        auto advance_q = [&](int nd, int noff) {
+            if (noff < 0 || noff >= query_len) return;
+            int nti = noff - nd;
+            if (nti < 0 || nti >= truth_len) return;
+            int ext = extend_q(nd, noff);
+            if (!next_q.count(nd) || next_q[nd] < ext) next_q[nd] = ext;
+        };
+        auto advance_r = [&](int nd, int noff) {
+            if (noff < 0 || noff >= ref_len) return;
+            int nti = noff - nd;
+            if (nti < 0 || nti >= truth_len) return;
+            int ext = extend_r(nd, noff);
+            if (!next_r.count(nd) || next_r[nd] < ext) next_r[nd] = ext;
+        };
+
+        for (auto & [d, off] : wfa_q) {
+            advance_q(d + 1, off + 1); // INS: qri+1, ti unchanged
+            advance_q(d - 1, off);     // DEL: qri unchanged, ti+1
+            advance_q(d,     off + 1); // SUB: qri+1, ti+1
+        }
+        for (auto & [d, off] : wfa_r) {
+            advance_r(d + 1, off + 1);
+            advance_r(d - 1, off);
+            advance_r(d,     off + 1);
+        }
+
+        // Cross-space swaps from newly promoted cells.
+        std::vector<std::pair<int,int>> new_q, new_r;
+        for (auto & [d, off] : next_q)
+            if (!wfa_q.count(d) || wfa_q[d] < off) new_q.push_back({d, off});
+        for (auto & [d, off] : next_r)
+            if (!wfa_r.count(d) || wfa_r[d] < off) new_r.push_back({d, off});
+
+        wfa_q = std::move(next_q);
+        wfa_r = std::move(next_r);
+        propagate_swaps(new_q, new_r);
+        record_corridor();
+    }
+
+    // -----------------------------------------------------------------------
+    // Phase 2: Corridor-bounded BFS fills ptrs and swap_pred_map.
+    // Logic mirrors the main BFS; cells outside the corridor are skipped.
+    // -----------------------------------------------------------------------
+
+    std::vector<uint8_t> done_q_mat(query_len * truth_len, 0);
+    std::vector<uint8_t> done_r_mat(ref_len   * truth_len, 0);
+    auto dq = [&](int qri, int ti) -> uint8_t& { return done_q_mat[qri * truth_len + ti]; };
+    auto dr = [&](int qri, int ti) -> uint8_t& { return done_r_mat[qri * truth_len + ti]; };
+
+    std::queue<idx1> bfs_q;
+    std::vector<idx1> curr_wave, prev_wave;
+
+    // Seed: start both spaces at (0,0).
+    ptrs[qi][0][0] |= PTR_MAT; dq(0, 0) = true;
+    ptrs[ri][0][0] |= PTR_MAT; dr(0, 0) = true;
+    bfs_q.push({qi, 0, 0});
+    bfs_q.push({ri, 0, 0});
+
+    int bfs_score = 0;
+    while (true) {
+        // EXTEND (free match/swap transitions at same score).
+        while (!bfs_q.empty()) {
+            idx1 x = bfs_q.front(); bfs_q.pop();
+            prev_wave.push_back(x);
+
+            if (x.hi == qi) {
+                // Match in QUERY space.
+                idx1 y(qi, x.qri + 1, x.ti + 1);
+                if (y.qri < query_len && y.ti < truth_len &&
+                        query[i][y.qri] == truth[i][y.ti] && !dq(y.qri, y.ti)) {
+                    ptrs[y.hi][y.qri][y.ti] |= PTR_MAT;
+                    if (corr_q.count(y.qri - y.ti)) {
+                        dq(y.qri, y.ti) = true;
+                        bfs_q.push(y); curr_wave.push_back(y);
+                    }
+                }
+                // Swap QUERY -> REF.
+                if (x.qri < query_len && x.ti < truth_len &&
+                        can_swap_q_to_r(x.qri, x.ti)) {
+                    idx1 z(ri, query_ref_ptrs[i][PTRS][x.qri] + 1, x.ti + 1);
+                    if (z.qri < ref_len && z.ti < truth_len &&
+                            ref[z.qri] == truth[i][z.ti] && !dr(z.qri, z.ti)) {
+                        ptrs[z.hi][z.qri][z.ti] |= PTR_SWP_MAT;
+                        swap_pred_map[z] = x;
+                        if (corr_r.count(z.qri - z.ti)) {
+                            dr(z.qri, z.ti) = true;
+                            bfs_q.push(z); curr_wave.push_back(z);
+                        }
+                    }
+                }
+            } else {
+                // Match in REF space.
+                idx1 y(ri, x.qri + 1, x.ti + 1);
+                if (y.qri < ref_len && y.ti < truth_len &&
+                        ref[y.qri] == truth[i][y.ti] && !dr(y.qri, y.ti)) {
+                    ptrs[y.hi][y.qri][y.ti] |= PTR_MAT;
+                    if (corr_r.count(y.qri - y.ti)) {
+                        dr(y.qri, y.ti) = true;
+                        bfs_q.push(y); curr_wave.push_back(y);
+                    }
+                }
+                // Swap REF -> QUERY.
+                if (x.qri < ref_len && x.ti < truth_len &&
+                        can_swap_r_to_q(x.qri, x.ti)) {
+                    idx1 z(qi, ref_query_ptrs[i][PTRS][x.qri] + 1, x.ti + 1);
+                    if (z.qri < query_len && z.ti < truth_len &&
+                            query[i][z.qri] == truth[i][z.ti] && !dq(z.qri, z.ti)) {
+                        ptrs[z.hi][z.qri][z.ti] |= PTR_SWP_MAT;
+                        swap_pred_map[z] = x;
+                        if (corr_q.count(z.qri - z.ti)) {
+                            dq(z.qri, z.ti) = true;
+                            bfs_q.push(z); curr_wave.push_back(z);
+                        }
+                    }
+                }
+            }
+        } // extend
+
+        // Mark cells as done (already done during extend — we mark on enqueue).
+        curr_wave.clear();
+
+        // Check termination.
+        if (dq(query_len - 1, truth_len - 1)) {
+            pr_query_ref_end = qi; break;
+        }
+        if (dr(ref_len - 1, truth_len - 1)) {
+            pr_query_ref_end = ri; break;
+        }
+
+        // NEXT SCORE: INS / DEL / SUB transitions.
+        bfs_score++;
+        for (const idx1 & x : prev_wave) {
+            int qr_len = (x.hi == qi) ? query_len : ref_len;
+            bool is_q = (x.hi == qi);
+
+            // INS: qri+1, ti
+            if (x.qri + 1 < qr_len) {
+                idx1 y(x.hi, x.qri + 1, x.ti);
+                uint8_t & done_cell = is_q ? dq(y.qri, y.ti) : dr(y.qri, y.ti);
+                if (!done_cell) {
+                    ptrs[y.hi][y.qri][y.ti] |= PTR_INS;
+                    bool in_corr = is_q ? corr_q.count(y.qri - y.ti) :
+                                         corr_r.count(y.qri - y.ti);
+                    if (in_corr) { done_cell = true; bfs_q.push(y); curr_wave.push_back(y); }
+                }
+            }
+            // DEL: qri, ti+1
+            if (x.ti + 1 < truth_len) {
+                idx1 y(x.hi, x.qri, x.ti + 1);
+                uint8_t & done_cell = is_q ? dq(y.qri, y.ti) : dr(y.qri, y.ti);
+                if (!done_cell) {
+                    ptrs[y.hi][y.qri][y.ti] |= PTR_DEL;
+                    bool in_corr = is_q ? corr_q.count(y.qri - y.ti) :
+                                         corr_r.count(y.qri - y.ti);
+                    if (in_corr) { done_cell = true; bfs_q.push(y); curr_wave.push_back(y); }
+                }
+            }
+            // SUB: qri+1, ti+1
+            if (x.qri + 1 < qr_len && x.ti + 1 < truth_len) {
+                idx1 y(x.hi, x.qri + 1, x.ti + 1);
+                uint8_t & done_cell = is_q ? dq(y.qri, y.ti) : dr(y.qri, y.ti);
+                if (!done_cell) {
+                    ptrs[y.hi][y.qri][y.ti] |= PTR_SUB;
+                    bool in_corr = is_q ? corr_q.count(y.qri - y.ti) :
+                                         corr_r.count(y.qri - y.ti);
+                    if (in_corr) { done_cell = true; bfs_q.push(y); curr_wave.push_back(y); }
+                }
+            }
+        }
+        prev_wave.clear();
+    } // while bfs
+
+    score_out = bfs_score;
+}
+
 void calc_prec_recall_aln(
         const std::string & query1, const std::string & query2,
         const std::string & truth1, const std::string & truth2, 
@@ -390,6 +733,22 @@ void calc_prec_recall_aln(
         int ri = 2*i + REF;   // ref index   (ptrs)
         int dqi = 2*(i-aln_start) + QUERY;
         int dri = 2*(i-aln_start) + REF;
+
+        // For large alignments, use the WFA-corridor path to avoid allocating
+        // and exploring the full O(query_len * truth_len) matrix.
+        size_t cell_count = (size_t)query_lens[i] * truth_lens[i];
+        if (cell_count > PR_WFA_CORRIDOR_THRESHOLD) {
+            // Push placeholder state entries so dqi/dri indexing stays consistent
+            // for subsequent alignments (state is not accessed for WFA path).
+            state.push_back(std::vector< std::vector<uint8_t> >());
+            state.push_back(std::vector< std::vector<uint8_t> >());
+            calc_prec_recall_aln_one_wfa(
+                    i, query, truth, ref,
+                    query_ref_ptrs, ref_query_ptrs, truth_ref_ptrs,
+                    qi, ri, query_lens[i], truth_lens[i], ref_len,
+                    s[i], ptrs, *swap_pred_maps[i], pr_query_ref_end[i]);
+            continue;
+        }
 
         // init full pointer/state matrices
         state.push_back(std::vector< std::vector<uint8_t> >(query_lens[i],
