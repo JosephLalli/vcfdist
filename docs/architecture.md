@@ -51,13 +51,13 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 1. **Read** — `fastaData` (reference; BED-scoped when `-b/--bed` is present; otherwise loaded after query/truth parsing from the ordered union of observed input contigs), `variantData` (query), `variantData` (truth).
 2. **Cluster** — variants are clustered per haplotype, then superclustered across haplotypes (`cluster.cpp`). BiWFA clustering launches outer haplotype/contig tasks and, when few outer tasks exist, assigns bounded inner workers to active-cluster reach computation while preserving serial merge/order behavior.
-3. **Realign** (optional, gated by `--realign-query` / `--realign-truth`) — left-shifts and re-emits the input VCFs.
+3. **Realign** (optional, gated by `--realign-query` / `--realign-truth`) — left-shifts and re-emits the input VCFs. `wf_swg_realign` in `dist.cpp` dispatches work items via a work-stealing thread pool bounded by a per-claim RAM budget (`min(max_ram * 30%, 3 GB)`); oversized single clusters are serialized against the full budget rather than blocking indefinitely.
 4. **Precision / recall** — `precision_recall_threads_wrapper` in `dist.cpp` partitions superclusters across threads and computes TP/FP/FN with credit via BiWFA. Large memory groups run the four independent query/truth haplotype alignments in parallel; very large superclusters in the lowest memory group can also reserve a small global budget of nested alignment workers based on the existing RAM-step estimate.
 5. **Edit distance** (optional, gated by `--distance`) — `edits_wrapper` in `dist.cpp` summarizes edit distance across the comparison and writes distance reports.
 6. **Phase analysis** — `phaseblockData` in `phase.cpp` annotates phase blocks and switch/flip errors.
 7. **Write** — `print.cpp` emits the report TSVs and (if applicable) the rewritten VCFs.
 
-The pipeline is single-process. Parallelism exists in BiWFA clustering/reclustering and precision/recall. `main.cpp` bounds clustering inner workers by available outer haplotype/contig tasks, and `dist.cpp::precision_recall_threads_wrapper` bounds nested precision/recall alignment workers with a global atomic budget.
+The pipeline is single-process. Parallelism exists in BiWFA clustering/reclustering, the optional realign stage, and precision/recall. `main.cpp` bounds clustering inner workers by available outer haplotype/contig tasks; `wf_swg_realign` uses a work-stealing pool bounded by a RAM budget; and `dist.cpp::precision_recall_threads_wrapper` bounds nested precision/recall alignment workers with a global atomic budget.
 
 ## Dependency graph (from Makefile)
 

@@ -71,7 +71,7 @@ Documented here so they can be matched, not invented.
 
 - vcfdist parallelizes by partitioning work, not by sharing mutable state. The Makefile already links `-lpthread`.
 - The pattern lives in `dist.cpp::precision_recall_threads_wrapper`: a fixed number of threads (`g.thread_steps[i]`) each take a disjoint slice of superclusters at a given RAM budget (`g.ram_steps[i]`); the main thread `join`s before stepping to the next budget level.
-- There are no `std::mutex`, `std::atomic`, or `pthread_mutex_*` uses in the current source. New code that needs cross-thread mutation should justify the choice — the existing convention is to partition the input and write to disjoint output slots.
+- The default convention is to partition input and write to disjoint output slots, avoiding shared mutable state. `std::atomic` is used where necessary for work-stealing counters and global worker-budget caps (`dist.cpp`, `cluster.cpp`); `std::mutex` and `pthread_mutex_*` are not used. New code that needs cross-thread mutation must justify the choice and document the synchronization model.
 - Threading changes require design approval. The design must state the scheduling model, expected scaling benefit, synchronization strategy, and peak-memory effect at the target thread counts.
 
 ## Error handling
