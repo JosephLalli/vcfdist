@@ -344,6 +344,12 @@ void generate_ptrs_strs(
  * pointers to/from reference. This function generates the pointer matrix, 
  * scores for each alignment, and pointer to if alignment ends on QUERY/REF.
  */
+// Cell states for the precision/recall wavefront BFS frontier.  A single
+// state matrix replaces the old `done` bool matrix plus the curr_wave/prev_wave
+// hash-set membership tests: PR_NEW means never reached, PR_IN_WAVE means
+// reached this wave but not yet committed, PR_DONE means committed.
+static constexpr uint8_t PR_NEW = 0, PR_IN_WAVE = 1, PR_DONE = 2;
+
 void calc_prec_recall_aln(
         const std::string & query1, const std::string & query2,
         const std::string & truth1, const std::string & truth2, 
@@ -376,7 +382,7 @@ void calc_prec_recall_aln(
     int truth_lens[4] =
             {int(truth1.size()), int(truth2.size()), int(truth1.size()), int(truth2.size())};
 
-    std::vector< std::vector< std::vector<bool> > > done;
+    std::vector< std::vector< std::vector<uint8_t> > > state;
 
     // for each combination of query and truth
     for (int i = aln_start; i < aln_stop; i++) {
@@ -385,24 +391,24 @@ void calc_prec_recall_aln(
         int dqi = 2*(i-aln_start) + QUERY;
         int dri = 2*(i-aln_start) + REF;
 
-        // init full pointer/done matrices
-        done.push_back(std::vector< std::vector<bool> >(query_lens[i],
-                    std::vector<bool>(truth_lens[i], false)));
-        done.push_back(std::vector< std::vector<bool> >(ref_len,
-                    std::vector<bool>(truth_lens[i], false)));
-        
+        // init full pointer/state matrices
+        state.push_back(std::vector< std::vector<uint8_t> >(query_lens[i],
+                    std::vector<uint8_t>(truth_lens[i], PR_NEW)));
+        state.push_back(std::vector< std::vector<uint8_t> >(ref_len,
+                    std::vector<uint8_t>(truth_lens[i], PR_NEW)));
+
         // set first wavefront
         std::queue<idx1> queue; // still to be explored in this wave
         queue.push({qi, 0, 0});
         ptrs[qi][0][0] |= PTR_MAT;
-        done[dqi][0][0] = true;
+        state[dqi][0][0] = PR_DONE;
         queue.push({ri, 0, 0});
         ptrs[ri][0][0] |= PTR_MAT;
-        done[dqi][0][0] = true;
+        state[dqi][0][0] = PR_DONE;
 
         // continue looping until full alignment found
-        std::unordered_set<idx1> curr_wave; // everything explored this wave
-        std::unordered_set<idx1> prev_wave; // everything explored prev wave
+        std::vector<idx1> curr_wave; // everything reached this wave (not yet done)
+        std::vector<idx1> prev_wave; // everything explored prev wave
         /* if (print) printf("\nFWD %s aln: (%d|%d, %d|%d, %d)\n", aln_strs[i].data(), */ 
         /*         qi, ri, query_lens[i], ref_len, truth_lens[i]); */
         while (true) {
@@ -414,15 +420,16 @@ void calc_prec_recall_aln(
                 idx1 x = queue.front(); queue.pop();
                 /* if (print) printf("    x = (%s, %d, %d)\n", */ 
                 /*         (x.hi % 2) ? "REF  " : "QUERY", x.qri, x.ti); */
-                prev_wave.insert(x);
+                prev_wave.push_back(x);
                 if (x.hi == qi) { // QUERY
                     // allow match on query
                     idx1 y(qi, x.qri+1, x.ti+1);
                     if (y.qri < query_lens[i] && y.ti < truth_lens[i] &&
                             query[i][y.qri] == truth[i][y.ti]) {
-                        if (!done[dqi][y.qri][y.ti]) {
-                            if (!contains(curr_wave, y)) {
-                                queue.push(y); curr_wave.insert(y);
+                        uint8_t & st = state[dqi][y.qri][y.ti];
+                        if (st != PR_DONE) {
+                            if (st == PR_NEW) {
+                                queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                             }
                             ptrs[y.hi][y.qri][y.ti] |= PTR_MAT;
                         }
@@ -435,9 +442,10 @@ void calc_prec_recall_aln(
                             truth_ref_ptrs[i][FLAGS][x.ti] & PTR_VAR_END)) {
                         if (z.qri < ref_len && z.ti < truth_lens[i] &&
                                 ref[z.qri] == truth[i][z.ti]) {
-                            if (!done[dri][z.qri][z.ti]) {
-                                if (!contains(curr_wave, z)) {
-                                    queue.push(z); curr_wave.insert(z);
+                            uint8_t & st = state[dri][z.qri][z.ti];
+                            if (st != PR_DONE) {
+                                if (st == PR_NEW) {
+                                    queue.push(z); curr_wave.push_back(z); st = PR_IN_WAVE;
                                 }
                                 ptrs[z.hi][z.qri][z.ti] |= PTR_SWP_MAT;
                                 (*swap_pred_maps[i])[z] = x;
@@ -449,9 +457,10 @@ void calc_prec_recall_aln(
                     idx1 y(ri, x.qri+1, x.ti+1);
                     if (y.qri < ref_len && y.ti < truth_lens[i] &&
                             ref[y.qri] == truth[i][y.ti]) {
-                        if (!done[dri][y.qri][y.ti]) {
-                            if (!contains(curr_wave, y)) {
-                                queue.push(y); curr_wave.insert(y);
+                        uint8_t & st = state[dri][y.qri][y.ti];
+                        if (st != PR_DONE) {
+                            if (st == PR_NEW) {
+                                queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                             }
                             ptrs[y.hi][y.qri][y.ti] |= PTR_MAT;
                         }
@@ -464,9 +473,10 @@ void calc_prec_recall_aln(
                             truth_ref_ptrs[i][FLAGS][x.ti] & PTR_VAR_END)) {
                         if (z.qri < query_lens[i] && z.ti < truth_lens[i] &&
                                 query[i][z.qri] == truth[i][z.ti]) {
-                            if (!done[dqi][z.qri][z.ti]) {
-                                if (!contains(curr_wave, z)) {
-                                    queue.push(z); curr_wave.insert(z);
+                            uint8_t & st = state[dqi][z.qri][z.ti];
+                            if (st != PR_DONE) {
+                                if (st == PR_NEW) {
+                                    queue.push(z); curr_wave.push_back(z); st = PR_IN_WAVE;
                                 }
                                 ptrs[z.hi][z.qri][z.ti] |= PTR_SWP_MAT;
                                 (*swap_pred_maps[i])[z] = x;
@@ -476,45 +486,45 @@ void calc_prec_recall_aln(
                 }
             }
 
-            // mark all cells visited this wave as done
-            for (idx1 x : curr_wave) { 
-                done[x.hi == ri ? dri : dqi][x.qri][x.ti] = true; 
+            // mark all cells reached this wave as done
+            for (const idx1 & x : curr_wave) {
+                state[x.hi == ri ? dri : dqi][x.qri][x.ti] = PR_DONE;
             }
             curr_wave.clear();
 
             // exit if we're done aligning
-            if (done[dqi][query_lens[i]-1][truth_lens[i]-1] ||
-                done[dri][ref_len-1][truth_lens[i]-1]) break;
+            if (state[dqi][query_lens[i]-1][truth_lens[i]-1] == PR_DONE ||
+                state[dri][ref_len-1][truth_lens[i]-1] == PR_DONE) break;
 
 
             // NEXT WAVEFRONT (increase score by one)
-            for (idx1 x : prev_wave) {
+            for (const idx1 & x : prev_wave) {
                 int qr_len = (x.hi == qi) ? query_lens[i] : ref_len;
                 if (x.qri+1 < qr_len) { // INS
                     idx1 y(x.hi, x.qri+1, x.ti);
-                    if (!done[y.hi == ri ? dri : dqi][y.qri][y.ti] && !contains(curr_wave, y)) {
-                        queue.push(y);
-                        curr_wave.insert(y);
+                    uint8_t & st = state[y.hi == ri ? dri : dqi][y.qri][y.ti];
+                    if (st == PR_NEW) {
+                        queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                     }
-                    if (!done[y.hi == ri ? dri : dqi][y.qri][y.ti])
+                    if (st != PR_DONE)
                         ptrs[y.hi][y.qri][y.ti] |= PTR_INS;
                 }
                 if (x.ti+1 < truth_lens[i]) { // DEL
                     idx1 y(x.hi, x.qri, x.ti+1);
-                    if (!done[y.hi == ri ? dri : dqi][y.qri][y.ti] && !contains(curr_wave, y)) {
-                        queue.push(y);
-                        curr_wave.insert(y);
+                    uint8_t & st = state[y.hi == ri ? dri : dqi][y.qri][y.ti];
+                    if (st == PR_NEW) {
+                        queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                     }
-                    if (!done[y.hi == ri ? dri : dqi][y.qri][y.ti])
+                    if (st != PR_DONE)
                         ptrs[y.hi][y.qri][y.ti] |= PTR_DEL;
                 }
                 if (x.qri+1 < qr_len && x.ti+1 < truth_lens[i]) { // SUB
                     idx1 y(x.hi, x.qri+1, x.ti+1);
-                    if (!done[y.hi == ri ? dri : dqi][y.qri][y.ti] && !contains(curr_wave, y)) {
-                        queue.push(y);
-                        curr_wave.insert(y);
+                    uint8_t & st = state[y.hi == ri ? dri : dqi][y.qri][y.ti];
+                    if (st == PR_NEW) {
+                        queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                     }
-                    if (!done[y.hi == ri ? dri : dqi][y.qri][y.ti])
+                    if (st != PR_DONE)
                         ptrs[y.hi][y.qri][y.ti] |= PTR_SUB;
                 }
             }
@@ -529,9 +539,9 @@ void calc_prec_recall_aln(
         if (print) print_ptrs(ptrs[ri], ref, truth[i]);
 
         // save where to start backtrack (prefer query to maximize TPs)
-        if (done[dqi][query_lens[i]-1][truth_lens[i]-1]) {
+        if (state[dqi][query_lens[i]-1][truth_lens[i]-1] == PR_DONE) {
             pr_query_ref_end[i] = qi;
-        } else if (done[dri][ref_len-1][truth_lens[i]-1]) {
+        } else if (state[dri][ref_len-1][truth_lens[i]-1] == PR_DONE) {
             pr_query_ref_end[i] = ri;
         } else { ERROR("Alignment not finished in 'prec_recall_aln()'."); }
 
