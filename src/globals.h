@@ -47,6 +47,7 @@ public:
 
     // precision-recall
     double credit_threshold = 0.7;
+    bool exact_prec_recall = false;
 
     // edit distance
     bool distance = false;

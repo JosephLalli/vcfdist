@@ -735,9 +735,11 @@ void calc_prec_recall_aln(
         int dri = 2*(i-aln_start) + REF;
 
         // For large alignments, use the WFA-corridor path to avoid allocating
-        // and exploring the full O(query_len * truth_len) matrix.
+        // and exploring the full O(query_len * truth_len) matrix. The exact
+        // dense BFS maximizes true-positive credit but is slower on giants;
+        // --exact-prec-recall forces it for byte-identical results.
         size_t cell_count = (size_t)query_lens[i] * truth_lens[i];
-        if (cell_count > PR_WFA_CORRIDOR_THRESHOLD) {
+        if (!g.exact_prec_recall && cell_count > PR_WFA_CORRIDOR_THRESHOLD) {
             // Push placeholder state entries so dqi/dri indexing stays consistent
             // for subsequent alignments (state is not accessed for WFA path).
             state.push_back(std::vector< std::vector<uint8_t> >());

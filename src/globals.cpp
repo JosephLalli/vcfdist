@@ -454,6 +454,11 @@ void Globals::parse_args(int argc, char ** argv) {
             i++;
             g.realign_query = true;
 /*******************************************************************************/
+        } else if (std::string(argv[i]) == "-ep" ||
+                std::string(argv[i]) == "--exact-prec-recall") {
+            i++;
+            g.exact_prec_recall = true;
+/*******************************************************************************/
         } else if (std::string(argv[i]) == "-ci" || 
                 std::string(argv[i]) == "--citation") {
             i++;
@@ -557,6 +562,9 @@ void Globals::print_usage() const
     printf("\n  Precision-Recall:\n");
     printf("  -ct, --credit-threshold <FLOAT> [%.2f]\n", g.credit_threshold);
     printf("      minimum partial credit to consider variant a true positive\n");
+    printf("  -ep, --exact-prec-recall\n");
+    printf("      use exact dense alignment for large superclusters instead of the\n");
+    printf("      faster banded WFA corridor (slower, maximizes true-positive credit)\n");
 
     printf("\n  Distance:\n");
     printf("  -d, --distance\n");
