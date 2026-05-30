@@ -676,8 +676,12 @@
         },
         {
           "threads": 1,
-          "wall_clock": "pending",
-          "notes": "t=1 measurement in progress; pool has 0 workers so main thread handles all work serially via try_steal_exec"
+          "wall_clock": "11:44.24",
+          "peak_rss_kb": 7452196,
+          "all_none_f1": 0.926225,
+          "all_none_truth_tp": 492641,
+          "output_diff_verdict": "PASS (matches WFA corridor baseline exactly)",
+          "notes": "0 pool workers; main thread handles all work via spin-steal from pool queue. Effectively serial."
         }
       ],
       "baseline_runs": [
@@ -692,7 +696,11 @@
       "speedup_vs_baseline": {
         "threads": 64,
         "wall_clock_improvement": "6.82s (7.2%)",
-        "mechanism": "Eliminated per-tier thread creation churn; 4-alignment inner parallelism now uses full pool for all superclusters rather than capped reservation system"
+        "mechanism": "Eliminated per-tier thread creation churn; 4-alignment inner parallelism now uses full pool for all superclusters rather than capped reservation system",
+        "t1_wall_clock": "11:44.24",
+        "t1_peak_rss_kb": 7452196,
+        "t64_vs_t1_speedup": "7.98x (704.24s / 88.23s)",
+        "t64_scaling_efficiency": "12.5% (7.98x / 64 threads)"
       },
       "memory_gate": {
         "branch_peak_rss_kb": 17934540,
