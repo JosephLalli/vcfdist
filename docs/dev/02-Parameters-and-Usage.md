@@ -129,7 +129,16 @@ Smith-Waterman gap extension penalty.
 ### -ct, --credit-threshold 
 *type: float, default: 0.70*
 
-Minimum partial credit (calculated as a fractional reduction in edit distance over if the variant is omitted) to consider a query variant a true positive. 
+Minimum partial credit (calculated as a fractional reduction in edit distance over if the variant is omitted) to consider a query variant a true positive.
+
+### -ep, --exact-prec-recall
+*type: flag*
+
+Use the exact dense state-matrix alignment for every supercluster alignment instead of the default banded WFA corridor.
+
+By default, any precision/recall alignment whose cell count exceeds 1,000,000 cells is handled by a WFA-corridor path that restricts the dense fill to diagonals reached by a WFA sweep. This is roughly 3x faster on the PR stage for large superclusters and fully deterministic, but the corridor's leaner co-optimal pointer DAG may undercount true-positive credit by a small amount on tie-rich superclusters.
+
+Passing `--exact-prec-recall` forces every alignment through the full O(query_len * truth_len) dense BFS, producing byte-identical results to the pre-corridor implementation. Use this flag when comparing against a baseline that predates the corridor optimization or when maximum true-positive credit is required. 
 
 ## Phasing:
 ### -pt, --phasing-threshold 

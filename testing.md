@@ -191,6 +191,17 @@ python3 tools/compare_vcfdist_runs.py \
     fixtures/HG00733_chr2_full "$OUT" --prefix vcfdist.
 ```
 
+The command above measures the **default (WFA corridor)** pathway, which is what
+users run. The committed `fixtures/HG00733_chr2_full` golden was produced by the
+exact dense alignment, so a strict byte-compare of a default run against the golden
+shows the documented corridor tradeoff: 3 INDEL true-positives reclassify to FN/FP
+(INDEL TRUTH_TP 82654 -> 82651; ALL TRUTH_TP 492644 -> 492641; ALL F1 0.926231 ->
+0.926225). SNP, SV, switch, and flip stats are identical. To reproduce the golden
+**byte-for-byte**, add `--exact-prec-recall` (`-ep`), which forces every alignment
+through the exact dense BFS at the cost of ~3x on the PR stage (PR stage ~43.8 s vs
+~14.6 s at 64 threads). Use exact mode for any correctness gate that requires a clean
+byte-compare against the pre-corridor golden; use the default for performance timing.
+
 ## VCF/BCF inspection
 
 `bcftools` is available in the benchmark environment. Use `bcftools view` for read-only inspection (headers, samples, contigs, region counts). `vcfdist` evaluates one sample at a time, so multi-sample panels must be inspected for sample names and then subset to one sample before they are used as benchmark inputs:

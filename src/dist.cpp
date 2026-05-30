@@ -368,6 +368,18 @@ static constexpr uint8_t PR_NEW = 0, PR_IN_WAVE = 1, PR_DONE = 2;
 // Cell count threshold: alignments larger than this use the WFA corridor path.
 static constexpr size_t PR_WFA_CORRIDOR_THRESHOLD = 1000000;
 
+// Intra-alignment score-wave parallelism (exact dense path only). An alignment
+// with at least this many cells parallelizes each wavefront sub-frontier across
+// g_pr_pool. Set above PR_WFA_CORRIDOR_THRESHOLD so default-mode runs (which
+// divert >1M-cell alignments to the corridor) never reach this path; only
+// --exact-prec-recall forces the giant dense fill that benefits from it.
+static constexpr size_t PR_INTRA_ALIGN_PAR_MIN_CELLS = 2000000;
+
+// A wavefront pass with fewer than this many input cells runs serially: the
+// per-chunk submit/barrier overhead outweighs the parallel work on narrow
+// sub-frontiers (most EXTEND closure sub-levels).
+static constexpr size_t PR_PAR_PASS_MIN = 512;
+
 /*
  * WFA-corridor alignment for one (query/ref, truth) alignment triplet.
  *
@@ -708,6 +720,199 @@ static void calc_prec_recall_aln_one_wfa(
     score_out = bfs_score;
 }
 
+
+/*
+ * Intra-alignment score-wave parallel dense fill for one (query/ref, truth)
+ * alignment. Same level-synchronous BFS as the serial dense path in
+ * calc_prec_recall_aln, but each wavefront sub-frontier is split into
+ * contiguous index ranges and processed across g_pr_pool. The dispatching
+ * thread runs chunk 0 and spin-steals the barrier (it is itself a pool worker,
+ * so it must never block).
+ *
+ * Per-thread memory: each chunk owns a private ParBuf (claimed cells + swap
+ * candidates) so frontier accumulation has no shared container and no write
+ * contention. The only shared writes are atomic CAS into `state` (claim a cell
+ * for this wave exactly once) and atomic OR into `ptrs` (commutative edge
+ * bits). The shared state/ptrs matrices are the ragged vector<vector<uint8_t>>
+ * from the serial path -- correct under __atomic, with possible false sharing
+ * at chunk boundaries (a perf concern measured in Step C, not a correctness
+ * one).
+ *
+ * Determinism vs. the serial path: the reachable cell set, per-cell BFS score,
+ * and ptr-bit union are all order-independent, so they are byte-identical. The
+ * one divergence source is swap_pred_map: serial is last-write-wins in FIFO
+ * order; here it is canonical-min (smallest predecessor x by idx1::operator<)
+ * merged single-threaded after each pass. Deterministic, but may differ from
+ * serial on tie-rich superclusters -- only reachable via --exact-prec-recall.
+ */
+static void calc_prec_recall_aln_one_par(
+        int i,
+        const RefList4<std::string> & query,
+        const RefList4<std::string> & truth,
+        const std::string & ref,
+        const RefList4< std::vector< std::vector<int> > > & query_ref_ptrs,
+        const RefList4< std::vector< std::vector<int> > > & ref_query_ptrs,
+        const RefList4< std::vector< std::vector<int> > > & truth_ref_ptrs,
+        int qi, int ri, int dqi, int dri,
+        int query_len, int truth_len, int ref_len,
+        int & score_out,
+        std::vector< std::vector< std::vector<uint8_t> > > & ptrs,
+        std::vector< std::vector< std::vector<uint8_t> > > & state,
+        std::unordered_map<idx1, idx1> & swap_pred_map,
+        int & pr_query_ref_end
+        ) {
+
+    struct ParBuf {
+        std::vector<idx1> claimed;                 // cells this chunk won via CAS
+        std::vector<std::pair<idx1,idx1>> swaps;   // (z, x) swap candidates
+        void clear() { claimed.clear(); swaps.clear(); }
+    };
+
+    const int W = g_pr_pool->size() + 1; // pool workers + this dispatching thread
+    std::vector<ParBuf> bufs(W);
+
+    // Atomically claim cell `y` (plane `dplane`) for the current wave and OR
+    // `ptr_bit` into its ptrs entry. Returns true iff the cell was not already
+    // PR_DONE (i.e. iff the ptr bit was set), which the swap path uses to decide
+    // whether to emit a swap-predecessor candidate.
+    auto claim = [&](int dplane, const idx1 & y, uint8_t ptr_bit, ParBuf & b) -> bool {
+        uint8_t & st = state[dplane][y.qri][y.ti];
+        uint8_t expected = PR_NEW;
+        bool won = __atomic_compare_exchange_n(&st, &expected, PR_IN_WAVE,
+                false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+        if (won) b.claimed.push_back(y);
+        if (expected != PR_DONE)
+            __atomic_fetch_or(&ptrs[y.hi][y.qri][y.ti], ptr_bit, __ATOMIC_RELAXED);
+        return expected != PR_DONE;
+    };
+
+    // EXTEND: from cell x, emit same-score match / swap-match successors.
+    auto extend_cell = [&](const idx1 & x, ParBuf & b) {
+        if (x.hi == qi) { // QUERY space
+            idx1 y(qi, x.qri+1, x.ti+1);
+            if (y.qri < query_len && y.ti < truth_len &&
+                    query[i][y.qri] == truth[i][y.ti])
+                claim(dqi, y, PTR_MAT, b);
+            idx1 z(ri, query_ref_ptrs[i][PTRS][x.qri]+1, x.ti+1);
+            if ( (!(query_ref_ptrs[i][FLAGS][x.qri] & PTR_VARIANT) ||
+                    query_ref_ptrs[i][FLAGS][x.qri] & PTR_VAR_END) &&
+                 (!(truth_ref_ptrs[i][FLAGS][x.ti] & PTR_VARIANT) ||
+                    truth_ref_ptrs[i][FLAGS][x.ti] & PTR_VAR_END) ) {
+                if (z.qri < ref_len && z.ti < truth_len &&
+                        ref[z.qri] == truth[i][z.ti])
+                    if (claim(dri, z, PTR_SWP_MAT, b)) b.swaps.emplace_back(z, x);
+            }
+        } else { // REF space (x.hi == ri)
+            idx1 y(ri, x.qri+1, x.ti+1);
+            if (y.qri < ref_len && y.ti < truth_len &&
+                    ref[y.qri] == truth[i][y.ti])
+                claim(dri, y, PTR_MAT, b);
+            idx1 z(qi, ref_query_ptrs[i][PTRS][x.qri]+1, x.ti+1);
+            if ( (!(ref_query_ptrs[i][FLAGS][x.qri] & PTR_VARIANT) ||
+                    ref_query_ptrs[i][FLAGS][x.qri] & PTR_VAR_END) &&
+                 (!(truth_ref_ptrs[i][FLAGS][x.ti] & PTR_VARIANT) ||
+                    truth_ref_ptrs[i][FLAGS][x.ti] & PTR_VAR_END) ) {
+                if (z.qri < query_len && z.ti < truth_len &&
+                        query[i][z.qri] == truth[i][z.ti])
+                    if (claim(dqi, z, PTR_SWP_MAT, b)) b.swaps.emplace_back(z, x);
+            }
+        }
+    };
+
+    // NEXT WAVEFRONT: from cell x, emit +1-score INS / DEL / SUB successors.
+    auto nextwave_cell = [&](const idx1 & x, ParBuf & b) {
+        int qr_len = (x.hi == qi) ? query_len : ref_len;
+        int dx = (x.hi == ri) ? dri : dqi;
+        if (x.qri+1 < qr_len)                            // INS
+            claim(dx, idx1(x.hi, x.qri+1, x.ti), PTR_INS, b);
+        if (x.ti+1 < truth_len)                          // DEL
+            claim(dx, idx1(x.hi, x.qri, x.ti+1), PTR_DEL, b);
+        if (x.qri+1 < qr_len && x.ti+1 < truth_len)      // SUB
+            claim(dx, idx1(x.hi, x.qri+1, x.ti+1), PTR_SUB, b);
+    };
+
+    // Run `fn` over every cell of `in` (contiguous chunks across the pool),
+    // gather all newly-claimed cells into `out`, and merge swap candidates
+    // canonical-min into swap_pred_map (single-threaded, after the barrier).
+    auto run_pass = [&](const std::vector<idx1> & in, auto && fn,
+                        std::vector<idx1> & out) {
+        const size_t n = in.size();
+        int nc = (int)std::min((size_t)W, n);
+        if (n < PR_PAR_PASS_MIN) nc = 1;
+        if (nc < 1) nc = 1;
+        for (int c = 0; c < nc; c++) bufs[c].clear();
+
+        if (nc == 1) {
+            for (const idx1 & x : in) fn(x, bufs[0]);
+        } else {
+            std::atomic<int> remaining(nc);
+            for (int c = 1; c < nc; c++) {
+                size_t lo = n*c/nc, hi = n*(c+1)/nc;
+                g_pr_pool->submit([&, c, lo, hi]() {
+                    for (size_t k = lo; k < hi; k++) fn(in[k], bufs[c]);
+                    remaining.fetch_sub(1, std::memory_order_acq_rel);
+                });
+            }
+            { size_t hi = n/nc; for (size_t k = 0; k < hi; k++) fn(in[k], bufs[0]); }
+            remaining.fetch_sub(1, std::memory_order_acq_rel);
+            while (remaining.load(std::memory_order_acquire) > 0) {
+                if (!g_pr_pool->try_steal_exec()) std::this_thread::yield();
+            }
+        }
+
+        out.clear();
+        for (int c = 0; c < nc; c++) {
+            out.insert(out.end(), bufs[c].claimed.begin(), bufs[c].claimed.end());
+            for (auto & pr : bufs[c].swaps) {
+                auto it = swap_pred_map.find(pr.first);
+                if (it == swap_pred_map.end() || pr.second < it->second)
+                    swap_pred_map[pr.first] = pr.second;
+            }
+        }
+    };
+
+    // first wavefront (matches the serial setup, including its dqi-twice quirk)
+    std::vector<idx1> level, next_level, curr_wave, prev_wave;
+    ptrs[qi][0][0] |= PTR_MAT;
+    state[dqi][0][0] = PR_DONE;
+    ptrs[ri][0][0] |= PTR_MAT;
+    state[dqi][0][0] = PR_DONE;
+    level.push_back({qi, 0, 0});
+    level.push_back({ri, 0, 0});
+
+    while (true) {
+        if (level.empty()) ERROR("Empty queue in 'prec_recall_aln()'.");
+
+        // EXTEND closure: one parallel sub-frontier pass per iteration.
+        while (!level.empty()) {
+            run_pass(level, extend_cell, next_level);
+            curr_wave.insert(curr_wave.end(), next_level.begin(), next_level.end());
+            prev_wave.insert(prev_wave.end(), level.begin(), level.end());
+            level.swap(next_level);
+        }
+
+        // commit every cell reached this score
+        for (const idx1 & x : curr_wave)
+            state[x.hi == ri ? dri : dqi][x.qri][x.ti] = PR_DONE;
+        curr_wave.clear();
+
+        if (state[dqi][query_len-1][truth_len-1] == PR_DONE ||
+            state[dri][ref_len-1][truth_len-1] == PR_DONE) break;
+
+        // NEXT WAVEFRONT (+1 score): seeds the next EXTEND closure
+        run_pass(prev_wave, nextwave_cell, level);
+        curr_wave.insert(curr_wave.end(), level.begin(), level.end());
+        prev_wave.clear();
+        score_out++;
+    }
+
+    if (state[dqi][query_len-1][truth_len-1] == PR_DONE) {
+        pr_query_ref_end = qi;
+    } else if (state[dri][ref_len-1][truth_len-1] == PR_DONE) {
+        pr_query_ref_end = ri;
+    } else { ERROR("Alignment not finished in 'prec_recall_aln()'."); }
+}
+
 void calc_prec_recall_aln(
         const std::string & query1, const std::string & query2,
         const std::string & truth1, const std::string & truth2, 
@@ -773,14 +978,30 @@ void calc_prec_recall_aln(
         state.push_back(std::vector< std::vector<uint8_t> >(ref_len,
                     std::vector<uint8_t>(truth_lens[i], PR_NEW)));
 
+        // For giant exact alignments, parallelize the dense fill across the pool
+        // (one wavefront sub-frontier at a time). Gated above the corridor
+        // threshold so default-mode runs never reach it; requires a real pool
+        // and serial-only debug printing.
+        if (g_pr_pool && g_pr_pool->size() > 0 && !print &&
+                cell_count >= PR_INTRA_ALIGN_PAR_MIN_CELLS) {
+            calc_prec_recall_aln_one_par(
+                    i, query, truth, ref,
+                    query_ref_ptrs, ref_query_ptrs, truth_ref_ptrs,
+                    qi, ri, dqi, dri,
+                    query_lens[i], truth_lens[i], ref_len,
+                    s[i], ptrs, state, *swap_pred_maps[i], pr_query_ref_end[i]);
+            continue;
+        }
+
         // set first wavefront
-        std::queue<idx1> queue; // still to be explored in this wave
-        queue.push({qi, 0, 0});
+        std::vector<idx1> level;      // current EXTEND sub-frontier (replaces FIFO queue)
+        std::vector<idx1> next_level; // EXTEND cells discovered by the current sub-frontier
         ptrs[qi][0][0] |= PTR_MAT;
         state[dqi][0][0] = PR_DONE;
-        queue.push({ri, 0, 0});
         ptrs[ri][0][0] |= PTR_MAT;
         state[dqi][0][0] = PR_DONE;
+        level.push_back({qi, 0, 0});
+        level.push_back({ri, 0, 0});
 
         // continue looping until full alignment found
         std::vector<idx1> curr_wave; // everything reached this wave (not yet done)
@@ -789,11 +1010,14 @@ void calc_prec_recall_aln(
         /*         qi, ri, query_lens[i], ref_len, truth_lens[i]); */
         while (true) {
             if (print) printf("  s = %d\n", s[i]);
-            if (queue.empty()) ERROR("Empty queue in 'prec_recall_aln()'.");
+            if (level.empty()) ERROR("Empty queue in 'prec_recall_aln()'.");
 
-            // EXTEND WAVEFRONT (stay at same score)
-            while (!queue.empty()) {
-                idx1 x = queue.front(); queue.pop();
+            // EXTEND WAVEFRONT (stay at same score): transitive match/swap-match
+            // closure, processed one sub-frontier ("level") per pass so the cells
+            // within a level can be expanded in parallel.
+            while (!level.empty()) {
+                next_level.clear();
+                for (const idx1 & x : level) {
                 /* if (print) printf("    x = (%s, %d, %d)\n", */ 
                 /*         (x.hi % 2) ? "REF  " : "QUERY", x.qri, x.ti); */
                 prev_wave.push_back(x);
@@ -805,7 +1029,7 @@ void calc_prec_recall_aln(
                         uint8_t & st = state[dqi][y.qri][y.ti];
                         if (st != PR_DONE) {
                             if (st == PR_NEW) {
-                                queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
+                                next_level.push_back(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                             }
                             ptrs[y.hi][y.qri][y.ti] |= PTR_MAT;
                         }
@@ -821,7 +1045,7 @@ void calc_prec_recall_aln(
                             uint8_t & st = state[dri][z.qri][z.ti];
                             if (st != PR_DONE) {
                                 if (st == PR_NEW) {
-                                    queue.push(z); curr_wave.push_back(z); st = PR_IN_WAVE;
+                                    next_level.push_back(z); curr_wave.push_back(z); st = PR_IN_WAVE;
                                 }
                                 ptrs[z.hi][z.qri][z.ti] |= PTR_SWP_MAT;
                                 (*swap_pred_maps[i])[z] = x;
@@ -836,7 +1060,7 @@ void calc_prec_recall_aln(
                         uint8_t & st = state[dri][y.qri][y.ti];
                         if (st != PR_DONE) {
                             if (st == PR_NEW) {
-                                queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
+                                next_level.push_back(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                             }
                             ptrs[y.hi][y.qri][y.ti] |= PTR_MAT;
                         }
@@ -852,7 +1076,7 @@ void calc_prec_recall_aln(
                             uint8_t & st = state[dqi][z.qri][z.ti];
                             if (st != PR_DONE) {
                                 if (st == PR_NEW) {
-                                    queue.push(z); curr_wave.push_back(z); st = PR_IN_WAVE;
+                                    next_level.push_back(z); curr_wave.push_back(z); st = PR_IN_WAVE;
                                 }
                                 ptrs[z.hi][z.qri][z.ti] |= PTR_SWP_MAT;
                                 (*swap_pred_maps[i])[z] = x;
@@ -860,6 +1084,8 @@ void calc_prec_recall_aln(
                         }
                     }
                 }
+                }
+                level.swap(next_level);
             }
 
             // mark all cells reached this wave as done
@@ -880,7 +1106,7 @@ void calc_prec_recall_aln(
                     idx1 y(x.hi, x.qri+1, x.ti);
                     uint8_t & st = state[y.hi == ri ? dri : dqi][y.qri][y.ti];
                     if (st == PR_NEW) {
-                        queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
+                        level.push_back(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                     }
                     if (st != PR_DONE)
                         ptrs[y.hi][y.qri][y.ti] |= PTR_INS;
@@ -889,7 +1115,7 @@ void calc_prec_recall_aln(
                     idx1 y(x.hi, x.qri, x.ti+1);
                     uint8_t & st = state[y.hi == ri ? dri : dqi][y.qri][y.ti];
                     if (st == PR_NEW) {
-                        queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
+                        level.push_back(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                     }
                     if (st != PR_DONE)
                         ptrs[y.hi][y.qri][y.ti] |= PTR_DEL;
@@ -898,7 +1124,7 @@ void calc_prec_recall_aln(
                     idx1 y(x.hi, x.qri+1, x.ti+1);
                     uint8_t & st = state[y.hi == ri ? dri : dqi][y.qri][y.ti];
                     if (st == PR_NEW) {
-                        queue.push(y); curr_wave.push_back(y); st = PR_IN_WAVE;
+                        level.push_back(y); curr_wave.push_back(y); st = PR_IN_WAVE;
                     }
                     if (st != PR_DONE)
                         ptrs[y.hi][y.qri][y.ti] |= PTR_SUB;

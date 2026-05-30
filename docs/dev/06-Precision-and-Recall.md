@@ -12,6 +12,13 @@ We can then assign credit to the remaining variants by marking the points at whi
 
 Some of the minor implementation details of this algorithm may change, but I expect the high-level process to remain the same.
 
+### Alignment backend selection
+
+The state-matrix fill in `calc_prec_recall_aln` uses one of two paths depending on alignment size and the `--exact-prec-recall` flag:
+
+- **WFA corridor (default for large alignments)**: when a per-alignment cell count exceeds 1,000,000, a WFA diagonal sweep first identifies reachable diagonals, and the dense state-matrix fill is restricted to those corridor diagonals. This avoids allocating the full matrix for large superclusters. The backward max-TP pass operates on the same corridor, so it may undercount true-positive credit slightly on superclusters with many co-optimal paths. Edit and alignment distance scores are unaffected.
+- **Exact dense BFS**: enabled by `--exact-prec-recall` (`-ep`), or automatically used for any alignment below the 1,000,000-cell threshold. Produces byte-identical results to the pre-corridor implementation and maximizes true-positive credit.
+
 
 ### Derivations for Graph Wavefront Alignment
 Below is some basic math for calculating the correct diagonal and offset for the next cell, resulting from a movement into a new adjacent submatrix (for forwards alignment, and backwards path parsing).
