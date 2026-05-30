@@ -1,10 +1,13 @@
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
+#include <deque>
+#include <functional>
+#include <mutex>
 #include <string>
 #include <set>
 #include <vector>
 #include <cstdio>
-#include <chrono>
 #include <utility>
 #include <queue>
 #include <thread>
@@ -32,62 +35,74 @@ struct RefList4 {
     }
 };
 
-static std::atomic<int> pr_nested_alignment_extra_workers(0);
-static constexpr int PR_NESTED_ALIGNMENT_EXTRA_WORKERS = CALLSETS * HAPS - 1;
-static constexpr double PR_ALIGNMENT_ESTIMATED_BYTES_PER_CELL = 20.0;
-static constexpr double PR_NESTED_ALIGNMENT_MIN_RAM_STEP_FRACTION = 0.10;
+class PrThreadPool {
+    std::deque<std::function<void()>> q_;
+    std::mutex mtx_;
+    std::condition_variable cv_;
+    std::vector<std::thread> workers_;
+    std::atomic<bool> stopped_{false};
+    std::atomic<int> pending_{0};
 
-static size_t pr_alignment_cell_estimate(
-        const std::string & query1, const std::string & query2,
-        const std::string & truth1, const std::string & truth2) {
-    size_t query_len = std::max(query1.size(), query2.size());
-    size_t truth_len = std::max(truth1.size(), truth2.size());
-    return query_len * truth_len;
-}
-
-static double pr_alignment_ram_gb_estimate(size_t cells) {
-    return double(cells) * PR_ALIGNMENT_ESTIMATED_BYTES_PER_CELL /
-            (1000.0 * 1000.0 * 1000.0);
-}
-
-static bool should_use_nested_pr_alignment_threads(
-        const std::string & query1, const std::string & query2,
-        const std::string & truth1, const std::string & truth2) {
-    double smallest_ram_step = g.ram_steps.empty() ?
-            g.max_ram / std::max(1, g.max_threads) : g.ram_steps[0];
-    size_t cells = pr_alignment_cell_estimate(query1, query2, truth1, truth2);
-    return pr_alignment_ram_gb_estimate(cells) >=
-            smallest_ram_step * PR_NESTED_ALIGNMENT_MIN_RAM_STEP_FRACTION;
-}
-
-static bool reserve_pr_nested_alignment_workers() {
-    if (g.max_threads < 16) return false;
-
-    int extra_worker_limit = std::max(PR_NESTED_ALIGNMENT_EXTRA_WORKERS, g.max_threads / 4);
-    int current = pr_nested_alignment_extra_workers.load();
-    while (current + PR_NESTED_ALIGNMENT_EXTRA_WORKERS <= extra_worker_limit) {
-        if (pr_nested_alignment_extra_workers.compare_exchange_weak(
-                    current, current + PR_NESTED_ALIGNMENT_EXTRA_WORKERS)) return true;
+    void loop() {
+        while (true) {
+            std::function<void()> task;
+            {
+                std::unique_lock<std::mutex> lk(mtx_);
+                cv_.wait(lk, [this]{ return stopped_.load() || !q_.empty(); });
+                if (stopped_.load() && q_.empty()) return;
+                task = std::move(q_.front());
+                q_.pop_front();
+            }
+            task();
+            pending_.fetch_sub(1, std::memory_order_release);
+        }
     }
-    return false;
-}
 
-static void release_pr_nested_alignment_workers() {
-    pr_nested_alignment_extra_workers.fetch_sub(PR_NESTED_ALIGNMENT_EXTRA_WORKERS);
-}
-
-class PrNestedAlignmentWorkerReservation {
 public:
-    explicit PrNestedAlignmentWorkerReservation(bool should_reserve) :
-            reserved(should_reserve && reserve_pr_nested_alignment_workers()) {}
-    ~PrNestedAlignmentWorkerReservation() {
-        if (reserved) release_pr_nested_alignment_workers();
+    explicit PrThreadPool(int n) {
+        workers_.reserve(n);
+        for (int i = 0; i < n; i++)
+            workers_.emplace_back([this]{ loop(); });
     }
-    bool active() const { return reserved; }
 
-private:
-    bool reserved;
+    ~PrThreadPool() {
+        stopped_.store(true);
+        cv_.notify_all();
+        for (auto & w : workers_) w.join();
+    }
+
+    void submit(std::function<void()> f) {
+        pending_.fetch_add(1, std::memory_order_relaxed);
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            q_.push_back(std::move(f));
+        }
+        cv_.notify_one();
+    }
+
+    bool try_steal_exec() {
+        std::function<void()> task;
+        {
+            std::lock_guard<std::mutex> lk(mtx_);
+            if (q_.empty()) return false;
+            task = std::move(q_.front());
+            q_.pop_front();
+        }
+        task();
+        pending_.fetch_sub(1, std::memory_order_release);
+        return true;
+    }
+
+    void wait_idle() {
+        while (pending_.load(std::memory_order_acquire) > 0) {
+            if (!try_steal_exec()) std::this_thread::yield();
+        }
+    }
+
+    int size() const { return static_cast<int>(workers_.size()); }
 };
+
+static PrThreadPool* g_pr_pool = nullptr;
 
 /******************************************************************************/
 
@@ -2127,19 +2142,20 @@ void precision_recall_threads_wrapper(
     if (g.verbosity >= 1) INFO("%s[5/8] Calculating precision and recall%s",
             COLOR_PURPLE, COLOR_WHITE);
 
-    if (g.verbosity >= 1 ) 
+    if (g.verbosity >= 1)
     for (int i = 0; i < g.thread_nsteps; i++) {
         INFO("  Superclusters using %7.3f to %7.3f GB RAM each (%3d threads): %8d",
                 i == 0 ? 0 : g.ram_steps[i-1], g.ram_steps[i], g.thread_steps[i],
                 int(sc_groups[i][CTG_IDX].size()));
     }
 
+    int pool_workers = std::max(0, g.max_threads - 1);
+    g_pr_pool = new PrThreadPool(pool_workers);
+
     for (int thread_step = g.thread_nsteps - 1; thread_step >= 0; thread_step--) {
-        int nthreads = g.thread_steps[thread_step];
         int nscs = static_cast<int>(sc_groups[thread_step][SC_IDX].size());
         if (nscs == 0) continue;
 
-        bool thread4 = (thread_step >= 2);
         std::atomic<int> next_sc(0);
 
         auto worker = [&]() {
@@ -2149,17 +2165,18 @@ void precision_recall_threads_wrapper(
                 precision_recall_wrapper(
                     clusterdata_ptr.get(),
                     std::cref(sc_groups),
-                    thread_step, idx, idx + 1, thread4);
+                    thread_step, idx, idx + 1);
             }
         };
 
-        std::vector<std::thread> threads;
-        threads.reserve(nthreads);
-        for (int t = 0; t < nthreads; t++)
-            threads.emplace_back(worker);
-        for (std::thread & t : threads)
-            t.join();
+        for (int t = 0; t < pool_workers; t++)
+            g_pr_pool->submit(worker);
+        worker();
+        g_pr_pool->wait_idle();
     }
+
+    delete g_pr_pool;
+    g_pr_pool = nullptr;
 }
 
 /******************************************************************************/
@@ -2167,7 +2184,7 @@ void precision_recall_threads_wrapper(
 void precision_recall_wrapper(
         superclusterData* clusterdata_ptr,
         const std::vector< std::vector< std::vector<int> > > & sc_groups,
-        int thread_step, int start, int stop, bool thread4) {
+        int thread_step, int start, int stop) {
 
     if (stop == start) return;
 
@@ -2282,45 +2299,31 @@ void precision_recall_wrapper(
         for (int i = 0; i < CALLSETS*HAPS; i++)
             swap_pred_maps.push_back(std::shared_ptr< std::unordered_map<idx1, idx1> >(new std::unordered_map<idx1, idx1>()));
 
-        // If memory-limited and each subproblem is large, spawn a new thread
-        // for each of the 4 alignments. For the lowest-memory group, only do
-        // this for very large superclusters and reserve a small global budget
-        // of extra workers to avoid broad oversubscription.
-        auto run_threaded_alignments = [&]() {
-            std::vector<std::thread> threads;
+        if (g_pr_pool) {
+            std::atomic<int> n_done{0};
             for (int ti = 0; ti < CALLSETS*HAPS; ti++) {
-                threads.push_back(std::thread( calc_prec_recall_aln,
-                    std::cref(query1), std::cref(query2), 
-                    std::cref(truth1), std::cref(truth2), std::cref(ref_q1),
-                    std::cref(query1_ref_ptrs), std::cref(ref_query1_ptrs), 
-                    std::cref(query2_ref_ptrs), std::cref(ref_query2_ptrs),
-                    std::cref(truth1_ref_ptrs), std::cref(truth2_ref_ptrs),
-                    std::ref(aln_score), std::ref(aln_ptrs), 
-                    std::ref(swap_pred_maps), std::ref(aln_query_ref_end), 
-                    ti, ti+1, false));
+                g_pr_pool->submit([&, ti]{
+                    calc_prec_recall_aln(
+                        query1, query2, truth1, truth2, ref_q1,
+                        query1_ref_ptrs, ref_query1_ptrs,
+                        query2_ref_ptrs, ref_query2_ptrs,
+                        truth1_ref_ptrs, truth2_ref_ptrs,
+                        aln_score, aln_ptrs, swap_pred_maps,
+                        aln_query_ref_end, ti, ti+1, false);
+                    n_done.fetch_add(1, std::memory_order_relaxed);
+                });
             }
-            for (std::thread & t : threads)
-                t.join();
-        };
-        auto run_serial_alignments = [&]() {
+            while (n_done.load(std::memory_order_relaxed) < CALLSETS*HAPS) {
+                if (!g_pr_pool->try_steal_exec()) std::this_thread::yield();
+            }
+        } else {
             calc_prec_recall_aln(
                     query1, query2, truth1, truth2, ref_q1,
-                    query1_ref_ptrs, ref_query1_ptrs, 
+                    query1_ref_ptrs, ref_query1_ptrs,
                     query2_ref_ptrs, ref_query2_ptrs,
                     truth1_ref_ptrs, truth2_ref_ptrs,
                     aln_score, aln_ptrs, swap_pred_maps,
                     aln_query_ref_end, 0, CALLSETS*HAPS, false);
-        };
-
-        if (thread4) {
-            run_threaded_alignments();
-        } else if (thread_step == 0 && should_use_nested_pr_alignment_threads(
-                    query1, query2, truth1, truth2)) {
-            PrNestedAlignmentWorkerReservation nested_worker_reservation(true);
-            if (nested_worker_reservation.active()) run_threaded_alignments();
-            else run_serial_alignments();
-        } else { // calculate 4 alignments in this thread
-            run_serial_alignments();
         }
 
         // store optimal phasing for each supercluster

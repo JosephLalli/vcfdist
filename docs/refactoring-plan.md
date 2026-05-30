@@ -144,6 +144,29 @@ For each slice:
 - **HTSlib resource leaks.** Resource handles (`htsFile*`, `bcf_hdr_t*`, `bcf1_t*`, `faidx_t*`) are freed at explicit points. A refactor that moves code across an early-return must re-check every `bcf_destroy` / `hts_close` path.
 - **Inlining and optimizer changes.** The Makefile defaults to `-O3`. Moving hot helpers can change inlining and throughput even when source behavior is unchanged.
 
+## Deferred future work (after all current tracks complete)
+
+These items are explicitly sequenced **after** every active performance track lands
+(intra-alignment wavefront parallelism and the cross-phase pipelining /
+tail-thread load-balancing work). Do not start them until those are finished.
+They still follow the per-slice workflow above: design note and approval before
+any implementation.
+
+### Multi-sample VCF comparison
+
+- **Goal.** Accept truth and query VCFs that each contain multiple samples,
+  instead of the current one-sample-per-run model.
+- **Semantics.** Samples present in both truth and query under identical sample
+  names are paired and compared; each matched sample pair is evaluated
+  independently. Sample-name matching defines the work set.
+- **Parallelism.** Matched sample pairs are independent work units and are
+  compared in parallel, adding a coarse-grained concurrency axis above the
+  existing per-supercluster and intra-alignment levels. Must share, not exceed,
+  the global thread budget.
+- **Status.** Not designed. Open questions: input/header handling, per-sample
+  output layout, and how the new outer parallelism interacts with the existing
+  thread budget. Design note + approval required before implementation.
+
 ## Exit criteria for this plan
 
 This plan is healthy when:

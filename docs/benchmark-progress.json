@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-28",
+  "last_updated": "2026-05-30",
   "baseline": {
     "tag": "v2.6.4",
     "docker_image": "timd1/vcfdist:v2.6.4",
@@ -37,8 +37,18 @@
       "--cluster size 100",
       "-v 0"
     ],
-    "preferred_thread_sweep": [1, 2, 8, 16, 32, 64],
-    "stretch_thread_sweep": [128, 256]
+    "preferred_thread_sweep": [
+      1,
+      2,
+      8,
+      16,
+      32,
+      64
+    ],
+    "stretch_thread_sweep": [
+      128,
+      256
+    ]
   },
   "regression_benchmark": {
     "name": "HG00733_chr2_35950000_45090000",
@@ -70,7 +80,13 @@
       "--cluster biwfa",
       "-p <out>/vcfdist."
     ],
-    "preferred_thread_sweep": [1, 2, 8, 32, 64],
+    "preferred_thread_sweep": [
+      1,
+      2,
+      8,
+      32,
+      64
+    ],
     "expected_metrics": {
       "superclusters": 12692,
       "all_none_truth_tp": 21708,
@@ -115,7 +131,9 @@
       "--realign-truth",
       "-p <out>/vcfdist."
     ],
-    "preferred_thread_sweep": [64],
+    "preferred_thread_sweep": [
+      64
+    ],
     "expected_metrics": {
       "superclusters": 354183,
       "all_none_truth_tp": 492644,
@@ -124,7 +142,8 @@
       "all_none_query_fp": 7355,
       "all_none_f1": 0.926231,
       "switch_errors": 24,
-      "flip_errors": 78
+      "flip_errors": 78,
+      "expected_metrics_note": "These are the exact-mode golden values (produced by --exact-prec-recall or by any run prior to the WFA corridor landing). The default corridor run produces all_none_f1=0.926225 and all_none_truth_tp=492641 (3 fewer INDEL TPs); SNP, SV, switch, and flip stats are identical. Use --exact-prec-recall when comparing against this fixture."
     }
   },
   "measurement_policy": {
@@ -338,8 +357,8 @@
       "precision_recall_seconds": 83.862,
       "timers_seconds": {
         "reading": 13.871,
-        "clustering": 37.850,
-        "realigning": 17.980,
+        "clustering": 37.85,
+        "realigning": 17.98,
         "reclustering": 11.818,
         "superclustering": 0.099,
         "precision_recall": 83.862,
@@ -434,7 +453,7 @@
           "threads": 32,
           "baseline_wall_clock": "0:20.23",
           "branch_wall_clock": "0:03.76",
-          "speedup_vs_baseline": 5.380,
+          "speedup_vs_baseline": 5.38,
           "baseline_max_rss_kb": 3393536,
           "branch_max_rss_kb": 462172,
           "rss_ratio_vs_baseline": 0.136,
@@ -522,8 +541,8 @@
             "reading": 2.141,
             "clustering": 7.693,
             "realigning": 5.833,
-            "reclustering": 7.590,
-            "precision_recall": 24.570,
+            "reclustering": 7.59,
+            "precision_recall": 24.57,
             "total": 47.959
           }
         }
@@ -555,10 +574,137 @@
         "The final derived-threshold run reduced wall clock from 113.54s to 48.21s, exceeding the 2.0x active-goal target while preserving all compared outputs.",
         "Peak RSS increased by roughly 0.5GB relative to the active baseline because nested precision/recall alignment workers can make several large superclusters progress concurrently."
       ]
+    },
+    {
+      "name": "pr_wfa_corridor_dual_pathway",
+      "slice_class": "optimization",
+      "status": "passed",
+      "branch": "master",
+      "benchmark": "HG00733_chr2_full",
+      "date_measured": "2026-05-30",
+      "summary": "Precision/recall alignment now selects between two backends per alignment. Alignments whose cell count exceeds PR_WFA_CORRIDOR_THRESHOLD (1,000,000) use a banded WFA-corridor path (calc_prec_recall_aln_one_wfa) that restricts the dense state-matrix fill to diagonals reached by a WFA sweep, avoiding full O(query_len*truth_len) allocation for large superclusters. The exact dense BFS is retained and forced by --exact-prec-recall / -ep. Also includes the commit that replaced the BFS frontier hash-sets with a flat state matrix (byte-exact, contributed ~1.86x PR stage speedup on its own before the corridor was added).",
+      "branch_runs": [
+        {
+          "threads": 64,
+          "pathway": "default (WFA corridor enabled)",
+          "precision_recall_seconds": 14.6,
+          "all_none_f1": 0.926225,
+          "all_none_truth_tp": 492641,
+          "indel_none_truth_tp": 82651,
+          "switch_errors": 24,
+          "flip_errors": 78,
+          "output_diff_verdict": "NEAR_PASS_3_INDEL_TP_SHIFT",
+          "notes": "3 INDEL TPs reclassify to FN/FP relative to exact baseline (INDEL TRUTH_TP 82654->82651; ALL TRUTH_TP 492644->492641). SNP, SV, and all phasing stats are identical. Deterministic: no RNG, fixed banded sweep."
+        },
+        {
+          "threads": 64,
+          "pathway": "exact (--exact-prec-recall)",
+          "precision_recall_seconds": 43.8,
+          "all_none_f1": 0.926231,
+          "all_none_truth_tp": 492644,
+          "indel_none_truth_tp": 82654,
+          "switch_errors": 24,
+          "flip_errors": 78,
+          "output_diff_verdict": "PASS",
+          "notes": "Byte-identical to pre-corridor dense golden. PR stage ~3x slower than corridor default."
+        }
+      ],
+      "speedup_pr_stage_corridor_vs_exact": 3.0,
+      "correctness_tradeoff": "3 INDEL true-positives shift to FN/FP under corridor default on the full-chr2 fixture; SNP, SV, switch, and flip metrics are unaffected",
+      "speed_source_analysis": "The corridor's ~3x over the exact dense BFS comes entirely from marking cells DONE on enqueue (recording only the first predecessor per cell) -- which is exactly the skipped work that causes the 3-TP undercount. A byte-exact corridor variant that processes all co-optimal predecessors was measured at 45.6s PR stage, no faster than the plain dense state-matrix (44.0s). Conclusion: the corridor is not a faster correct algorithm. The accuracy-neutral 1.86x (81.8s->44.0s) comes from the state-matrix commit (33dea6b); the additional ~3x is an accuracy-for-speed tradeoff. A real accuracy-neutral speedup on large alignments requires intra-alignment wavefront parallelism (see pr_wavefront_parallel_slice0) or the full WFA diagonal-offset rewrite. The corridor NO-GO analysis is recorded in full on branch perf/sparse-pr-wavefront (docs/exec-plans/active/052926_sparse_wavefront_status.md); master ships the corridor as the deterministic default per a separate human decision to keep both pathways."
+    },
+    {
+      "name": "pr_wavefront_parallel_slice0",
+      "slice_class": "exploratory",
+      "status": "go",
+      "branch": "perf/pr-wavefront-slice0-measure",
+      "benchmark": "HG00733_chr2_full",
+      "date_measured": "2026-05-30",
+      "summary": "Slice 0 (Amdahl-ceiling measurement) of the intra-alignment score-wave parallelism plan (docs/pr-wavefront-parallel-plan.md). Throwaway instrumentation (VCFDIST_PR_WAVE_DUMP=1, gated, remove after go/no-go) recorded the per-wave frontier widths of the longest dense alignment of the largest full-chr2 supercluster, to decide whether parallelizing a single supercluster alignment from the inside is worth building before building it.",
+      "giant_alignment": {
+        "query_len": 4557,
+        "truth_len": 6396,
+        "cell_count": 29146572,
+        "waves_S": 1858,
+        "cells_processed_N": 29953339,
+        "avg_wave_width": 16121,
+        "median_wave_width": 16379,
+        "min_wave_width": 2224,
+        "max_wave_width": 20683,
+        "waves_narrower_than_64_threads": 0
+      },
+      "amdahl_ceiling": {
+        "formula": "N / sum_w ceil(width_w / P)",
+        "P4": 4.0,
+        "P8": 8.0,
+        "P16": 15.99,
+        "P32": 31.97,
+        "P64": 63.88
+      },
+      "decision": "GO",
+      "notes": "Near-perfect parallel ceiling: fat, uniform waves (avg 16,121 cells), zero thin tails (no wave narrower than the 64-thread team), only 1858 score-barriers (a few ms at 64 threads). This is the accuracy-neutral path to both sustained 64-core utilization during the giant-supercluster long pole and a faster giant -- it parallelizes the exact fill and (Slice 4) the corridor. Windowed fixtures never build a giant supercluster, so this ceiling is only observable on HG00733_chr2_full; the dense path it measures runs under --exact-prec-recall.",
+      "next_slices": "Slice 1 (extract+restructure dense fill, byte-exact); Slice 2 (thread-safe writes incl. canonical swap_pred_map, single-threaded); Slice 3 (intra-alignment threads for giant alignments); Slice 4 (port the proven pattern to the corridor default)."
+    },
+    {
+      "name": "pr_shared_thread_pool",
+      "slice_class": "optimization",
+      "status": "passed",
+      "branch": "perf/pr-wavefront-slice0-measure",
+      "benchmark": "HG00733_chr2_full",
+      "date_measured": "2026-05-30",
+      "base_commit": "718b403 feat: add --exact-prec-recall flag for exact PR alignment",
+      "summary": "Replace the three-level oversubscribing thread architecture (nthreads outer std::threads per RAM tier, 4 nested std::threads for high-RAM superclusters, a reservation counter to bound nesting) with a single fixed PrThreadPool of max_threads-1 workers. All PR work -- outer supercluster dispatch and the 4-alignment inner parallelism -- is scheduled through the same pool queue. Pool workers never block; callers in the inner dispatch spin-steal from the queue (try_steal_exec) while waiting for their 4 alignment tasks, preventing deadlock. This eliminates thread creation/destruction churn per tier and the oversubscription that caused the previous omp intra-alignment experiment to be net-neutral at the wall level.",
+      "correctness_gate": {
+        "command": "bash demo/regression.sh",
+        "verdict": "PASS",
+        "log": "PASS demo regression: superclusters=6037, ALL_TP=9096, ALL_FN=52, ALL_FP=14, switch_errors=3, flip_errors=13"
+      },
+      "windowed_fixture_check": {
+        "fixture": "HG00733_chr2_35950000_45090000",
+        "threads": 64,
+        "all_best_f1": "0.947265",
+        "verdict": "byte-identical to serial baseline"
+      },
+      "branch_runs": [
+        {
+          "threads": 64,
+          "wall_clock": "1:28.23",
+          "peak_rss_kb": 17934540,
+          "all_none_f1": 0.926225,
+          "all_none_truth_tp": 492641,
+          "output_diff_verdict": "PASS (matches WFA corridor baseline exactly)"
+        },
+        {
+          "threads": 1,
+          "wall_clock": "pending",
+          "notes": "t=1 measurement in progress; pool has 0 workers so main thread handles all work serially via try_steal_exec"
+        }
+      ],
+      "baseline_runs": [
+        {
+          "threads": 64,
+          "wall_clock": "1:35.05",
+          "peak_rss_kb": 17947648,
+          "commit": "718b403",
+          "notes": "WFA corridor baseline, same branch before pool changes"
+        }
+      ],
+      "speedup_vs_baseline": {
+        "threads": 64,
+        "wall_clock_improvement": "6.82s (7.2%)",
+        "mechanism": "Eliminated per-tier thread creation churn; 4-alignment inner parallelism now uses full pool for all superclusters rather than capped reservation system"
+      },
+      "memory_gate": {
+        "branch_peak_rss_kb": 17934540,
+        "baseline_peak_rss_kb": 17947648,
+        "ratio": 1.0,
+        "verdict": "PASS (ratio < 3.0x)"
+      }
     }
   ],
   "open_measurement_gaps": [
     "Record host CPU, NUMA topology, local binary build identifier, and storage notes for each benchmark host.",
-    "Repeat chr2 regression timing runs when using this fixture for final scaling claims; the current sweep records one run per requested thread count and shows useful scaling through 8 threads before saturating on the handful of dominant superclusters."
+    "Repeat chr2 regression timing runs when using this fixture for final scaling claims; the current sweep records one run per requested thread count and shows useful scaling through 8 threads before saturating on the handful of dominant superclusters.",
+    "Intra-alignment wavefront parallelism (docs/pr-wavefront-parallel-plan.md) Slices 1-4 are unmeasured: pending byte-exact perf-neutral gates for the restructure/atomics slices and a 1,2,8,16,32,64 thread sweep (PR-stage wall, total wall, peak RSS) for the parallel slices on HG00733_chr2_full."
   ]
 }
