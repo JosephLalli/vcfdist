@@ -59,6 +59,8 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 The pipeline is single-process. Parallelism exists in BiWFA clustering/reclustering, the optional realign stage, and precision/recall. `main.cpp` bounds clustering inner workers by available outer haplotype/contig tasks; `wf_swg_realign` uses a work-stealing pool bounded by a RAM budget; and `dist.cpp::precision_recall_threads_wrapper` bounds nested precision/recall alignment workers with a global atomic budget.
 
+An intra-alignment score-wave parallelism experiment (one OpenMP team per giant `--exact-prec-recall` alignment, barrier between score waves) was tried on branch `perf/pr-wavefront-slice0-measure` and was a NO-GO due to anti-scaling: the per-wave serial merge dominates. The code is disabled by default (`g_pr_intra_team = 1` in `dist.cpp`) and the branch is parked. See `docs/refactoring-plan.md § Tried and retired` and `docs/benchmark-progress.json` (entry `pr_wavefront_intra_team`) for the full result. The outer threading model described above is the only active PR concurrency path.
+
 ## Dependency graph (from Makefile)
 
 ```

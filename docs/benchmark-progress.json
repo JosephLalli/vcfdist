@@ -555,6 +555,34 @@
         "The final derived-threshold run reduced wall clock from 113.54s to 48.21s, exceeding the 2.0x active-goal target while preserving all compared outputs.",
         "Peak RSS increased by roughly 0.5GB relative to the active baseline because nested precision/recall alignment workers can make several large superclusters progress concurrently."
       ]
+    },
+    {
+      "name": "pr_wavefront_intra_team",
+      "slice_class": "optimization",
+      "status": "no_go",
+      "branch": "perf/pr-wavefront-slice0-measure",
+      "branch_note": "PARKED, NOT MERGED. Full design doc and complete measurements live on the branch: docs/pr-wavefront-parallel-plan.md and this file's slice_results entry there.",
+      "benchmark": "HG00733_chr2_full",
+      "date_measured": "2026-05-30",
+      "summary": "Intra-alignment score-wave parallelism for --exact-prec-recall giant superclusters: one persistent OpenMP team per alignment, barrier between score waves, giants deferred to a serial post-phase (shape B). Preceded by Slice 0 (name: pr_wavefront_parallel_slice0, on branch) which measured a 63.88x Amdahl ceiling at P=64 from a cells/critical-path model. NO-GO: the implementation anti-scales. Root cause is that the per-wave serial merge (omp single over claimed-cell buffers) is O(frontier width), the same order as the parallel compute, making the effective serial fraction ~98%. The Slice 0 ceiling ignored this merge cost and does not survive contact with the real implementation.",
+      "correctness_gate": {
+        "verdict": "PASS",
+        "detail": "Full-chr2 --exact-prec-recall t=1/t=8/t=64 outputs are byte-identical. Demo regression PASS."
+      },
+      "performance_gate": {
+        "verdict": "FAIL (anti-scaling)",
+        "metric": "PR stage [5] seconds, full-chr2 --exact-prec-recall",
+        "sweep": {
+          "t1_pr_s": 351.403,
+          "t2_pr_s": 395.336,
+          "t8_pr_s": 578.024,
+          "t16_pr_s": 514.932,
+          "t32_pr_s": 607.981,
+          "t64_pr_s": 632.039
+        },
+        "isolation_note": "Windowed fixture (-t 64 outer fixed, VCFDIST_PR_INTRA_THREADS varied): team scales 2->8 (2.25x) then saturates 8->64; serial dense fill (team off) is ~5x faster than team's best."
+      },
+      "disposition": "Disabled by default (src/dist.cpp: g_pr_intra_team=1). Opt-in via VCFDIST_PR_INTRA_THREADS>1 env var. Only --exact-prec-recall affected; default WFA-corridor path untouched. Recommendation: pursue outer-axis parallelism (phase pipelining, tail load balancing) for the giant long-pole instead."
     }
   ],
   "open_measurement_gaps": [

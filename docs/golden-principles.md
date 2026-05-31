@@ -9,6 +9,8 @@ Core invariants for vcfdist development. Sources: `docs/coding-guidelines.md` an
 
 ## Performance
 
+- **Profile before optimizing.** No optimization or performance refactor starts without a baseline profile (`perf` / flamegraph / callgrind) that pins the hot path at function+line granularity and a whole-program payoff bound ("best case if this part goes to zero"). Instrumenting the inputs to a cost model (cell counts, wave widths) is not profiling. If the payoff is small, stop before designing.
+- **Spike before plan.** Prototype the riskiest assumption (usually "will this actually be faster?") and run an isolation sweep on a small fixture before writing the production plan. Any parallelism ceiling must model the design's serial join cost (per-iteration merge/reduce/barrier), not just the problem's latent parallelism, and must be calibrated against at least one real measurement. See `refactoring-plan.md § Workflow per slice`.
 - Optimize for high-core wall-clock runtime first (64-core scaling is the near-term target).
 - Per-core memory growth must stay below `3.0x` relative to baseline at the same thread count (cap relaxed from `1.3x` on 2026-05-28; rationale in `testing.md`).
 - Do not trade correctness for speed.

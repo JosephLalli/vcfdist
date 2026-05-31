@@ -125,14 +125,16 @@ For each slice:
 1. **Branch from `master`.** Branch name: `refactor/<short-slice-name>` for pure/performance refactors, `perf/<short-slice-name>` for optimizations, or `port/<short-slice-name>` for approved port experiments.
 2. **Classify the slice.** Record whether it is pure refactor, performance refactor, optimization, or port/rewrite experiment.
 3. **Capture baselines.** Run the required correctness and benchmark commands on the `v2.6.4` baseline or the current documented baseline. Archive the timed output trees and timing/RSS summaries.
-4. **Write a design note.** The note must include the performance hypothesis, correctness risk, memory-risk assessment, benchmark plan, and expected output diff (`none`).
-5. **Get approval before implementation.** Design decisions are approved before code changes. Any algorithm, threading, memory-layout, language/runtime, dependency, CLI, or output-semantic change requires explicit approval.
-6. **Implement in commits that each compile clean under `-Wall -Wextra`.** Small commits beat large ones. Behavior preservation per commit is the bar unless the approved design says an intermediate commit is non-final.
-7. **Rerun correctness gates** on the branch tip and diff against archived baselines.
-8. **Rerun performance gates** on the branch tip, validate the exact timed output tree against the archived baseline output tree, and compare wall-clock, scaling efficiency, and peak RSS against baseline.
-9. **Update `docs/benchmark-progress.json`** with the measured result or with the reason the slice is enabling-only.
-10. **Update `architecture.md`** when the file structure, data flow, or concurrency model changes.
-11. **Merge only if gates and approvals are satisfied.** Once a design is approved, the implementation/verification loop runs to completion unless the gate fails or the design assumptions are proven wrong.
+4. **Profile the baseline first (mandatory before any optimization or performance refactor).** Run a real profiler (`perf` / flamegraph / callgrind) on the baseline to (a) confirm the hot path at function+line granularity and (b) compute the whole-program payoff bound — the best case if that part went to zero. Instrumenting the *inputs to a cost model* (cell counts, wave widths) is not profiling; it justifies a theory instead of observing behavior. If the payoff bound is small, stop here and pick a different slice. Pure refactors with no performance claim may skip this step; everything else may not.
+5. **Spike the riskiest assumption before writing the plan.** For optimizations the binding constraint is usually "will this actually be faster?" Build a throwaway, *profiled* prototype of that assumption and run an isolation sweep — fix every other axis, vary only the new dimension — on a *small* fixture. Only after the spike shows a win is the production plan worth writing. Keep the simple baseline as a first-class comparator until the optimization is proven, not assumed.
+6. **Write a design note.** The note must include: the profiler evidence and whole-program payoff bound from step 4; the spike result from step 5; the performance hypothesis; the correctness risk; the memory-risk assessment; the benchmark plan; the expected output diff (`none`); and **goal-tied kill-gate thresholds written before building** — the wall-clock or scaling number that, if unmet, aborts the slice. A feature flag or kill switch is not a decision gate. Any parallelism or Amdahl ceiling in the note must model the design's serial join cost (per-iteration merge/reduce/gather/barrier), not just the problem's latent parallelism, and must be calibrated against at least one real measurement before it counts as a GO input.
+7. **Get approval before implementation.** Design decisions are approved before code changes. Any algorithm, threading, memory-layout, language/runtime, dependency, CLI, or output-semantic change requires explicit approval.
+8. **Implement in commits that each compile clean under `-Wall -Wextra`.** Small commits beat large ones. Behavior preservation per commit is the bar unless the approved design says an intermediate commit is non-final.
+9. **Rerun correctness gates** on the branch tip and diff against archived baselines.
+10. **Rerun performance gates** on the branch tip, validate the exact timed output tree against the archived baseline output tree, and compare wall-clock, scaling efficiency, and peak RSS against baseline. Performance is the binding gate for an optimization; do not let green correctness gates stand in for unmeasured speed.
+11. **Update `docs/benchmark-progress.json`** with the measured result or with the reason the slice is enabling-only.
+12. **Update `architecture.md`** when the file structure, data flow, or concurrency model changes.
+13. **Merge only if gates and approvals are satisfied.** Once a design is approved, the implementation/verification loop runs to completion unless the gate fails or the design assumptions are proven wrong. A GO decision inherited across a session or context boundary is re-examined against its evidence before large investment — execute the design, not a checklist.
 
 ## What can go wrong
 
@@ -143,6 +145,43 @@ For each slice:
 - **Threading invariants.** Current parallelism is based on disjoint work partitions. Any code motion across thread boundaries must preserve output disjointness or explicitly justify synchronization.
 - **HTSlib resource leaks.** Resource handles (`htsFile*`, `bcf_hdr_t*`, `bcf1_t*`, `faidx_t*`) are freed at explicit points. A refactor that moves code across an early-return must re-check every `bcf_destroy` / `hts_close` path.
 - **Inlining and optimizer changes.** The Makefile defaults to `-O3`. Moving hot helpers can change inlining and throughput even when source behavior is unchanged.
+- **Half-ledger parallelism models.** An Amdahl or speedup ceiling that counts only the problem's available parallel work (cell count, critical-path wave count) and omits the design's serial join (per-wave merge, reduce, gather, barrier) overstates the ceiling, often by orders of magnitude. "Wide enough to fill the threads" rules out starvation; it does not prove the join cost is dominated. Model the serial join explicitly and calibrate the model against one real run before trusting it. See § Tried and retired for the intra-alignment NO-GO this caused.
+
+## Tried and retired: intra-alignment score-wave parallelism (NO-GO, 2026-05-30)
+
+Branch `perf/pr-wavefront-slice0-measure` (parked, not merged) implemented "shape B"
+intra-alignment parallelism for `--exact-prec-recall` giant superclusters: one
+persistent OpenMP team per alignment, with a barrier between score waves, while the
+four haplotype alignments run serially and giants are deferred to a serial post-phase
+to avoid oversubscribing the outer `PrThreadPool`. The Slice 0 Amdahl-ceiling
+measurement (63.88x at P=64) was a theoretical cells/critical-path model that was used
+to justify building it.
+
+**Result: NO-GO. The implementation anti-scales.** Full-chr2 `--exact-prec-recall`
+PR-stage seconds: t=1 **351s** < t=2 395s < t=16 515s < t=8 578s < t=32 608s < t=64
+632s. Fastest at a single thread. The root cause is that the per-wave serial merge --
+concatenating each thread's claimed-cell buffer under an `omp single` region -- is
+O(frontier width), the same asymptotic order as the per-wave parallel compute. The
+dense BFS wavefront's frontiers are thin relative to total cells, so the merge fraction
+is approximately 98% serial, and Amdahl's law makes speedup negligible regardless of
+team width. An intra-team isolation sweep (outer `-t 64` fixed, team width varied on
+the windowed fixture) shows the team scales 2->8 (2.25x) then saturates at ~8 wide;
+the serial dense fill with no team is roughly 5x faster than the team's best. The
+code is byte-exact under concurrency (t=1, t=8, and t=64 produce byte-identical
+outputs), but correctness is not the binding constraint -- performance is.
+
+The implementation is disabled by default via `g_pr_intra_team = 1` in `src/dist.cpp`
+and can be opted into with the environment variable `VCFDIST_PR_INTRA_THREADS > 1`.
+Only `--exact-prec-recall` is affected; the default WFA-corridor path is untouched.
+Full measured numbers are recorded in `docs/benchmark-progress.json` (entry
+`name: "pr_wavefront_intra_team"`) **on the parked branch**, not on master.
+
+**What to do instead.** The giant-supercluster long pole requires outer-axis
+parallelism: running more of the work that surrounds the giant concurrently. The
+relevant directions are cross-phase pipelining (query/truth concurrent, chunk overlaps
+realign) and better tail-thread load balancing across the existing `PrThreadPool` task
+queue. A future corridor port of the same intra-alignment pattern would have the same
+serial-merge bottleneck unless the O(frontier) merge is redesigned away first.
 
 ## Exit criteria for this plan
 
