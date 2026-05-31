@@ -2,6 +2,25 @@
 
 These guidelines describe how the existing vcfdist source is written. New code should match. The goal is to keep the codebase coherent during refactoring, not to import an outside style.
 
+## Core invariants
+
+### Correctness
+
+- Output files, genotyping error rates, switch error rates, and flip error rates must not change unless a separate approved feature proposal explicitly changes public semantics.
+- No branch merges until the demo regression gate is green. See `testing.md § Correctness regression gate`.
+
+### Performance
+
+- **Profile before optimizing.** No optimization or performance refactor starts without a baseline profile (`perf` / flamegraph / callgrind) that pins the hot path at function+line granularity and a whole-program payoff bound ("best case if this part goes to zero"). Instrumenting the inputs to a cost model (cell counts, wave widths) is not profiling. If the payoff is small, stop before designing.
+- **Spike before plan.** Prototype the riskiest assumption (usually "will this actually be faster?") and run an isolation sweep on a small fixture before writing the production plan. Any parallelism ceiling must model the design's serial join cost (per-iteration merge/reduce/barrier), not just the problem's latent parallelism, and must be calibrated against at least one real measurement. See `refactoring-plan.md § Workflow per slice`.
+- Optimize for high-core wall-clock runtime first (64-core scaling is the near-term target).
+- Per-core memory growth must stay below `3.0x` relative to baseline at the same thread count (rationale in `testing.md`).
+- Do not trade correctness for speed.
+
+### Authorship
+
+- Do not add AI-attribution markers to code, docs, or commit messages. The drift checker `tools/check_agent_docs.sh` enforces this.
+
 ## Language and build
 
 - C++17. The Makefile sets `-std=c++17 -Wall -Wextra -O3`. New code must compile clean under those flags.

@@ -4,90 +4,24 @@
 
 Coordinate safe, measured performance-refactor slices for vcfdist's existing C++17 monolithic source tree. Each slice must preserve current correctness and public behavior unless a separate approved proposal explicitly changes semantics.
 
-## Goals
+## Where the spec details live
 
-- Improve high-core scaling efficiency, especially at the 64-core target.
-- Work toward an eventual 2x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count.
-- Preserve output files, precision/recall behavior, genotyping error rates, switch error rates, and flip error rates.
-- Keep per-core memory growth below the threshold in `docs/refactoring-plan.md` unless explicitly approved.
-- Use benchmark evidence and architecture notes to select slices, not file size alone.
-- Keep changes small enough to review, benchmark, and revert.
-- Maintain `docs/benchmark-progress.json` as the live measurement index.
-- Update `docs/architecture.md` when implementation changes alter file structure, data flow, concurrency, or language/runtime boundaries.
+Goals, requirements, classification taxonomy (pure refactor / performance refactor / optimization / port/rewrite), correctness acceptance, performance acceptance (including the `3.0x` per-core RSS cap), and non-goals are defined once in the docs below. Do not restate them here.
 
-## Requirements
+| Topic | See |
+|---|---|
+| Goals and non-goals | `docs/refactoring-plan.md § Goals`, `§ Non-goals` |
+| Slice classification | `docs/refactoring-plan.md § Slice classes` |
+| Correctness acceptance | `docs/refactoring-plan.md § Correctness gate`, `testing.md § Correctness regression gate` |
+| Performance acceptance, RSS cap, thread sweep | `docs/refactoring-plan.md § Performance gate`, `testing.md § Baseline`, `testing.md § Timed-output validation` |
+| Design approval rules | `docs/refactoring-plan.md § Workflow per slice` step 7, `docs/agents/index.md § Loop boundaries` |
+| Implementation conventions | `docs/coding-guidelines.md` |
+| Hotspots and structural tensions | `docs/architecture.md § Known structural tensions` |
+| Tried and retired directions | `docs/refactoring-plan.md § Tried and retired` |
+| Live measurements | `docs/benchmark-progress.json` |
 
-### Slice selection
+## Track-specific conventions
 
-- Explorer must identify candidate slices from source structure, benchmark evidence, and known bottlenecks.
-- Each candidate must name the touched files/symbols, suspected hot path or scaling bottleneck, expected speedup mechanism, memory-risk profile, and blast radius.
-- Oracle must pick at most one candidate per cycle and classify it as one of:
-  - pure refactor;
-  - performance refactor;
-  - optimization;
-  - port/rewrite experiment.
-
-### Design approval
-
-- A design note is required before implementation.
-- The design note must include target seams, performance hypothesis, correctness risk, memory-risk assessment, benchmark plan, and expected output diff (`none`).
-- Explicit approval is required before changing algorithms, threading, memory layout, runtime/language, dependencies, CLI, output semantics, or public reports.
-
-### Implementation
-
-- Work branches start from `master`.
-- Branch names follow `refactor/<short-slice-name>`, `perf/<short-slice-name>`, or `port/<short-slice-name>`.
-- Commits should be small and each commit should compile clean under `-Wall -Wextra`.
-- New C++ code must follow `docs/coding-guidelines.md`.
-- Behavior preservation per commit is the default unless the approved design allows a non-final intermediate.
-
-### Correctness acceptance
-
-- Build `src/vcfdist` and run `bash demo/regression.sh`.
-- Compare branch outputs to the checked-in `demo/results/` baseline under the rules in `testing.md`.
-- Output files must match byte-for-byte or through the documented normalization where volatile headers are expected.
-- Genotyping, switch, and flip error rates must not change.
-- Any stdout/stderr differences must be explained in the verification note.
-
-### Performance acceptance
-
-- Record canonical measurements with the environment and command in `testing.md` / `docs/benchmark-progress.json`; current chr22 baseline is native direct timing of `./src/vcfdist` with `/usr/bin/time -v`.
-- Validate the exact output tree produced by the timed benchmark invocation against the archived baseline output tree; validation runs after timing and does not affect the copied wall-clock value.
-- Record wall-clock runtime, maximum resident set size, thread count, execution environment and binary/image identifier, host CPU/NUMA notes, baseline tag/commit, branch commit, baseline/measured output artifact directories, validation command/log, and output-diff verdict.
-- Preferred thread sweep: `1, 2, 8, 16, 32, 64`.
-- Optional stretch sweep: `128, 256`.
-- Pure refactors must not materially slow the canonical benchmark.
-- Performance refactors may be accepted as enabling-only if the design explains the later optimization they enable and why any intermediate cost is acceptable.
-- Optimizations should show measured improvement in wall-clock runtime or scaling efficiency.
-- Memory at equal thread counts must remain below `1.3x` baseline peak RSS unless explicitly approved.
-
-## Non-goals
-
-- Do not trade correctness for speed.
-- Do not change public CLI, output formats, or report semantics as part of routine performance work.
-- Do not rename existing symbols merely to match a new style.
-- Do not add design-pattern abstractions unless they enable a measured performance change, delete more code than they add, or structurally prevent a recurring bug class.
-- Do not add new dependencies, language runtimes, generated build systems, or build complexity without explicit approval.
-
-## Initial hotspots and structural tensions
-
-Current architecture notes identify these areas as likely investigation targets, pending benchmark evidence:
-
-- `dist.cpp` — largest source file; contains precision/recall, edit-distance summarization, BiWFA distance routines, wave/queue helpers, and current threading driver.
-- `cluster.cpp` — clustering, superclustering, and BiWFA-driven realignment path.
-- `variant.cpp` — VCF read/write and per-contig/top-level variant containers.
-- `print.cpp` — all report writers and INFO formatting.
-- `globals.cpp` — mostly CLI parsing; hidden churn risk through the global `Globals` singleton.
-
-Current parallelism is per-supercluster inside `dist.cpp::precision_recall_threads_wrapper`. Any change that crosses thread boundaries must preserve disjoint output ownership or justify synchronization.
-
-## Reference documents
-
-- `AGENTS.md`
-- `docs/refactoring-plan.md`
-- `docs/architecture.md`
-- `docs/coding-guidelines.md`
-- `docs/multiagent-process.md`
-- `docs/benchmark-progress.json`
-- `testing.md`
-- `INFRASTRUCTURE_SUMMARY.md`
+- Branch naming: `refactor/<short-slice-name>` for pure/performance refactors, `perf/<short-slice-name>` for optimizations, `port/<short-slice-name>` for approved port experiments.
+- Branches start from `master`.
+- Commits compile clean under `-Wall -Wextra`.

@@ -19,6 +19,10 @@ Each work item is classified before implementation:
 
 The default path is C++ performance refactoring. Rust is on the table both as an experiment and, after approval, as production implementation. It is not assumed for every slice.
 
+## Gate-change policy
+
+Benchmark thresholds and gate definitions in this document are policy. They must not be changed without `oracle` or human review. A failing gate is reported and reshaped (return to `designer`/`oracle`), never waived inside a slice.
+
 ## Correctness gate (mandatory)
 
 No branch merges unless output correctness is unchanged against the authoritative demo regression baseline.
@@ -71,7 +75,7 @@ If a larger NUMA host is available, optional stretch measurements may add:
 128, 256
 ```
 
-The key success metric is better scaling efficiency, followed by an eventual 2x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count.
+The key success metric is better scaling efficiency, followed by an eventual 32x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count.
 
 ### Runtime acceptance
 
@@ -81,7 +85,7 @@ The key success metric is better scaling efficiency, followed by an eventual 2x 
 
 ### Memory acceptance
 
-Per-core memory usage must stay below `3.0x` relative to the baseline at the same thread count. Compare `(branch peak RSS / threads)` to `(baseline peak RSS / threads)`; at equal thread counts this is the same as requiring branch peak RSS below `3.0x` baseline peak RSS. The cap was relaxed from `1.3x` to `3.0x` on 2026-05-28 in exchange for higher wall-clock parallelism on the `HG00733_chr2_full` benchmark; see `testing.md` for the full rationale and absolute RSS figures. Increases beyond `3.0x` require explicit approval before implementation.
+Per-core memory usage must stay below `3.0x` relative to the baseline at the same thread count. Compare `(branch peak RSS / threads)` to `(baseline peak RSS / threads)`; at equal thread counts this is the same as requiring branch peak RSS below `3.0x` baseline peak RSS. Increases beyond `3.0x` require explicit approval before implementation.
 
 Do not trade speed for unbounded replication. Any design that duplicates reference data, variant data, superclusters, dynamic-programming matrices, output buffers, or thread-local caches must include memory accounting and peak RSS comparison.
 
@@ -145,43 +149,40 @@ For each slice:
 - **Threading invariants.** Current parallelism is based on disjoint work partitions. Any code motion across thread boundaries must preserve output disjointness or explicitly justify synchronization.
 - **HTSlib resource leaks.** Resource handles (`htsFile*`, `bcf_hdr_t*`, `bcf1_t*`, `faidx_t*`) are freed at explicit points. A refactor that moves code across an early-return must re-check every `bcf_destroy` / `hts_close` path.
 - **Inlining and optimizer changes.** The Makefile defaults to `-O3`. Moving hot helpers can change inlining and throughput even when source behavior is unchanged.
-- **Half-ledger parallelism models.** An Amdahl or speedup ceiling that counts only the problem's available parallel work (cell count, critical-path wave count) and omits the design's serial join (per-wave merge, reduce, gather, barrier) overstates the ceiling, often by orders of magnitude. "Wide enough to fill the threads" rules out starvation; it does not prove the join cost is dominated. Model the serial join explicitly and calibrate the model against one real run before trusting it. See § Tried and retired for the intra-alignment NO-GO this caused.
+- **Half-ledger parallelism models.** An Amdahl or speedup ceiling that counts only the problem's available parallel work (cell count, critical-path wave count) and omits the design's serial join (per-wave merge, reduce, gather, barrier) overstates the ceiling, often by orders of magnitude. "Wide enough to fill the threads" rules out starvation; it does not prove the join cost is dominated. Model the serial join explicitly and calibrate the model against one real run before trusting it. See § Tried and retired for the per-score-wave-jobs NO-GO this caused.
 
-## Tried and retired: intra-alignment score-wave parallelism (NO-GO, 2026-05-30)
+## Tried and retired: unified thread pool with per-score-wave jobs (NO-GO, 2026-05-30)
 
-Branch `perf/pr-wavefront-slice0-measure` (parked, not merged) implemented "shape B"
-intra-alignment parallelism for `--exact-prec-recall` giant superclusters: one
-persistent OpenMP team per alignment, with a barrier between score waves, while the
-four haplotype alignments run serially and giants are deferred to a serial post-phase
-to avoid oversubscribing the outer `PrThreadPool`. The Slice 0 Amdahl-ceiling
-measurement (63.88x at P=64) was a theoretical cells/critical-path model that was used
-to justify building it.
+Branch `perf/pr-wavefront-slice0-measure` (parked, not merged) implemented a unified
+thread pool that scheduled per-score-wave jobs for `--exact-prec-recall` giant
+superclusters: one persistent OpenMP team per alignment, with a barrier between score
+waves, while the four haplotype alignments run serially and giants are deferred to a
+serial post-phase to avoid oversubscribing the outer precision/recall threads. The
+Slice 0 ceiling estimate (63.88x at P=64) was a theoretical cells/critical-path model
+that was used to justify building it.
 
-**Result: NO-GO. The implementation anti-scales.** Full-chr2 `--exact-prec-recall`
-PR-stage seconds: t=1 **351s** < t=2 395s < t=16 515s < t=8 578s < t=32 608s < t=64
-632s. Fastest at a single thread. The root cause is that the per-wave serial merge --
-concatenating each thread's claimed-cell buffer under an `omp single` region -- is
-O(frontier width), the same asymptotic order as the per-wave parallel compute. The
-dense BFS wavefront's frontiers are thin relative to total cells, so the merge fraction
-is approximately 98% serial, and Amdahl's law makes speedup negligible regardless of
-team width. An intra-team isolation sweep (outer `-t 64` fixed, team width varied on
-the windowed fixture) shows the team scales 2->8 (2.25x) then saturates at ~8 wide;
-the serial dense fill with no team is roughly 5x faster than the team's best. The
-code is byte-exact under concurrency (t=1, t=8, and t=64 produce byte-identical
-outputs), but correctness is not the binding constraint -- performance is.
+**Result: NO-GO. The implementation anti-scales** because the per-wave job dispatch and
+barrier produce thrashing and scheduling overhead that dominates the parallel compute.
+Full-chr2 `--exact-prec-recall` PR-stage seconds: t=1 **351s** < t=2 395s < t=16 515s <
+t=8 578s < t=32 608s < t=64 632s -- fastest at a single thread. Each score wave's
+frontier is thin relative to total cells, so the serial per-wave join (merging each
+thread's claimed cells under a barrier) is the same order as the parallel work; the
+effective serial fraction is ~98% and widening the team cannot help. An isolation sweep
+(outer `-t 64` fixed, team width varied on the windowed fixture) shows the team scales
+2->8 (2.25x) then saturates at ~8 wide; the serial dense fill with no team is roughly 5x
+faster than the team's best. Outputs are byte-identical across t=1/t=8/t=64, but
+correctness was never the binding constraint -- performance is.
 
-The implementation is disabled by default via `g_pr_intra_team = 1` in `src/dist.cpp`
-and can be opted into with the environment variable `VCFDIST_PR_INTRA_THREADS > 1`.
-Only `--exact-prec-recall` is affected; the default WFA-corridor path is untouched.
-Full measured numbers are recorded in `docs/benchmark-progress.json` (entry
+The experiment is disabled and parked on the branch (`g_pr_intra_team = 1` in
+`src/dist.cpp` there, opt-in via `VCFDIST_PR_INTRA_THREADS > 1`); none of it is on
+`master`. Only `--exact-prec-recall` was affected; the default WFA-corridor path is
+untouched. Full measured numbers are recorded in `docs/benchmark-progress.json` (entry
 `name: "pr_wavefront_intra_team"`) **on the parked branch**, not on master.
 
-**What to do instead.** The giant-supercluster long pole requires outer-axis
-parallelism: running more of the work that surrounds the giant concurrently. The
-relevant directions are cross-phase pipelining (query/truth concurrent, chunk overlaps
-realign) and better tail-thread load balancing across the existing `PrThreadPool` task
-queue. A future corridor port of the same intra-alignment pattern would have the same
-serial-merge bottleneck unless the O(frontier) merge is redesigned away first.
+**What to do instead.** The giant-supercluster long pole still needs outer-axis
+parallelism -- running more of the surrounding work concurrently rather than splitting a
+single alignment. No specific design is approved or started; the next slice should come
+from fresh profiler evidence.
 
 ## Exit criteria for this plan
 
@@ -193,4 +194,4 @@ This plan is healthy when:
 4. `architecture.md` reflects any changed file structure, data flow, or concurrency model.
 5. The next slice decision is based on the tracker and benchmark evidence.
 
-Long-term success is measured by better scaling efficiency, eventual 2x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count, unchanged output/error rates, and bounded per-core memory.
+Long-term success is measured by better scaling efficiency, eventual 32x wall-clock speedup on a documented performance benchmark large enough to exercise the target core count, unchanged output/error rates, and bounded per-core memory.

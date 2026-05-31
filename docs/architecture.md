@@ -29,13 +29,14 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 
 ### Algorithms
 
-- `dist.cpp` (2867 lines) — the bulk of the comparison logic, including:
+- `dist.cpp` (~3,250 lines) — the bulk of the comparison logic, including:
   - `precision_recall_threads_wrapper` and `precision_recall_wrapper`: the multithreaded driver over superclusters.
+  - `calc_prec_recall_aln_one_wfa`: the WFA-corridor alignment path used by default for large precision/recall alignments; the exact dense-BFS state-matrix path is the fallback and is forced for every alignment by `--exact-prec-recall`.
   - `edits_wrapper`: edit-distance summarization.
   - `count_dist`, the BiWFA distance routines, and the wave/queue helpers (`contains(...)` etc.).
   - `calc_ng50` and other phasing/NGA50 utilities.
 
-  This file is the largest single source in the repo (~31% of `src/` LOC) and is a likely candidate for early performance investigation if benchmark evidence points there.
+  This file is the largest single source in the repo and is a likely candidate for early performance investigation if benchmark evidence points there.
 
 ### Output
 
@@ -52,14 +53,14 @@ All sources live in `src/`. Headers and implementation files come in matching pa
 1. **Read** — `fastaData` (reference; BED-scoped when `-b/--bed` is present; otherwise loaded after query/truth parsing from the ordered union of observed input contigs), `variantData` (query), `variantData` (truth).
 2. **Cluster** — variants are clustered per haplotype, then superclustered across haplotypes (`cluster.cpp`). BiWFA clustering launches outer haplotype/contig tasks and, when few outer tasks exist, assigns bounded inner workers to active-cluster reach computation while preserving serial merge/order behavior.
 3. **Realign** (optional, gated by `--realign-query` / `--realign-truth`) — left-shifts and re-emits the input VCFs. `wf_swg_realign` in `dist.cpp` dispatches work items via a work-stealing thread pool bounded by a per-claim RAM budget (`min(max_ram * 30%, 3 GB)`); oversized single clusters are serialized against the full budget rather than blocking indefinitely.
-4. **Precision / recall** — `precision_recall_threads_wrapper` in `dist.cpp` partitions superclusters across threads and computes TP/FP/FN with credit via BiWFA. Large memory groups run the four independent query/truth haplotype alignments in parallel; very large superclusters in the lowest memory group can also reserve a small global budget of nested alignment workers based on the existing RAM-step estimate.
+4. **Precision / recall** — `precision_recall_threads_wrapper` in `dist.cpp` partitions superclusters across threads and computes TP/FP/FN with credit. Each query/truth haplotype pair is aligned by one of two paths. The default **WFA-corridor** path (`calc_prec_recall_aln_one_wfa`) avoids allocating and exploring the full `O(query_len × truth_len)` dynamic-programming matrix and is taken whenever the pair's cell count exceeds `PR_WFA_CORRIDOR_THRESHOLD`. The exact **dense-BFS** path explores the full state matrix to maximize true-positive credit; `--exact-prec-recall` forces it for every alignment, producing byte-identical results at higher cost on giant superclusters. Large memory groups run the four independent haplotype alignments in parallel; very large superclusters in the lowest memory group can also reserve a small global budget of nested alignment workers based on the existing RAM-step estimate.
 5. **Edit distance** (optional, gated by `--distance`) — `edits_wrapper` in `dist.cpp` summarizes edit distance across the comparison and writes distance reports.
 6. **Phase analysis** — `phaseblockData` in `phase.cpp` annotates phase blocks and switch/flip errors.
 7. **Write** — `print.cpp` emits the report TSVs and (if applicable) the rewritten VCFs.
 
 The pipeline is single-process. Parallelism exists in BiWFA clustering/reclustering, the optional realign stage, and precision/recall. `main.cpp` bounds clustering inner workers by available outer haplotype/contig tasks; `wf_swg_realign` uses a work-stealing pool bounded by a RAM budget; and `dist.cpp::precision_recall_threads_wrapper` bounds nested precision/recall alignment workers with a global atomic budget.
 
-An intra-alignment score-wave parallelism experiment (one OpenMP team per giant `--exact-prec-recall` alignment, barrier between score waves) was tried on branch `perf/pr-wavefront-slice0-measure` and was a NO-GO due to anti-scaling: the per-wave serial merge dominates. The code is disabled by default (`g_pr_intra_team = 1` in `dist.cpp`) and the branch is parked. See `docs/refactoring-plan.md § Tried and retired` and `docs/benchmark-progress.json` (entry `pr_wavefront_intra_team`) for the full result. The outer threading model described above is the only active PR concurrency path.
+A unified-thread-pool experiment that scheduled per-score-wave jobs for giant `--exact-prec-recall` alignments (one team per alignment, barrier between score waves) was tried on branch `perf/pr-wavefront-slice0-measure` and was a NO-GO: it anti-scales, because the per-wave job dispatch and barrier produce thrashing and scheduling overhead that dominates the parallel compute. The branch is parked and the code is not on `master`. See `docs/refactoring-plan.md § Tried and retired` and `docs/benchmark-progress.json` (entry `pr_wavefront_intra_team`) for the full result. The outer threading model described above is the only active PR concurrency path.
 
 ## Dependency graph (from Makefile)
 
@@ -77,22 +78,25 @@ phase.o      : phase.cpp   phase.h   cluster.h print.h globals.h defs.h variant.
 
 `globals.h` and `defs.h` are pulled by nearly everything. `print.h` is pulled by most of the data-container TUs (which call `INFO(...)` and friends). `dist.h` and `cluster.h` are mutually known to each other.
 
-## File sizes (lines)
+## File sizes (approximate)
 
-| File | Lines | Role |
+An approximate snapshot for navigation only; not maintained per-commit. Use it for relative
+sizing and per-file role, not exact counts.
+
+| File | ~Lines | Role |
 |---|---:|---|
-| `dist.cpp` | 2867 | precision/recall, edit distance, BiWFA, threading |
-| `cluster.cpp` | 1285 | clustering and superclustering |
-| `variant.cpp` | 1004 | VCF read/write, `ctgVariants`/`variantData` |
+| `dist.cpp` | 3250 | precision/recall, WFA-corridor + dense-BFS alignment, edit distance, BiWFA, threading |
+| `cluster.cpp` | 1290 | clustering and superclustering |
+| `variant.cpp` | 1000 | VCF read/write, `ctgVariants`/`variantData` |
 | `print.cpp` | 905 | all reporting and INFO output |
-| `globals.cpp` | 655 | mostly CLI parsing (`parse_args` ≈ 491 lines) |
+| `globals.cpp` | 665 | mostly CLI parsing (`parse_args` ≈ 491 lines) |
 | `phase.cpp` | 626 | phase-block analysis |
+| `main.cpp` | 292 | pipeline driver |
 | `bed.cpp` | 288 | BED region handling |
 | `edit.cpp` | 280 | edit-distance summary |
-| `main.cpp` | 292 | pipeline driver |
 | `timer.cpp` | 31 | timer primitives |
 
-Total: ~9.2k lines across `src/`.
+Total: ~9.7k lines across `src/`.
 
 ## Known structural tensions
 

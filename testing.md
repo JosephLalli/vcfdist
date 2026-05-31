@@ -419,7 +419,7 @@ The near-term target is efficient 64-core use. Stretch measurements help charact
 
 For short runs, use the median of three or more runs. The bundled chr22 fixture runs in roughly 20-30 seconds on the recorded baseline host and is not enough by itself for final 64-core scaling claims. If a run is unexpectedly under 20 seconds, stop and decide whether the fixture, command, or documentation is stale before recording scaling evidence. A single baseline/branch pair at the relevant thread count is acceptable for an intermediate smoke check, but final performance claims should repeat near-threshold results and use a benchmark tier large enough to exercise the target core count.
 
-Per-core memory growth must stay below `3.0x` relative to baseline at the same thread count unless the design was explicitly approved for a larger increase. Compare `(branch peak RSS / threads)` to `(baseline peak RSS / threads)`; at equal thread counts this is the same as requiring branch peak RSS below `3.0x` baseline peak RSS. The previous `1.3x` cap was relaxed on 2026-05-28 in exchange for higher wall-clock parallelism on the `HG00733_chr2_full` benchmark; on that fixture the relaxed cap is `~29 GB` against the `9.68 GB` baseline.
+Per-core memory growth must stay below `3.0x` relative to baseline at the same thread count unless the design was explicitly approved for a larger increase. Compare `(branch peak RSS / threads)` to `(baseline peak RSS / threads)`; at equal thread counts this is the same as requiring branch peak RSS below `3.0x` baseline peak RSS. On the `HG00733_chr2_full` benchmark the `3.0x` cap is `~29 GB` against the `9.68 GB` baseline.
 
 ## Smaller checks
 

@@ -1,3 +1,5 @@
+> **User-facing wiki mirror.** The canonical version of these pages is the [GitHub wiki](https://github.com/TimD1/vcfdist/wiki); the files in `docs/dev/` are a snapshot for offline reference. This directory is *not* a place for internal project tracking, refactor design notes, or harness coordination — see `AGENTS.md` for those.
+
 **Welcome to the vcfdist wiki!**
 
 If you have any **questions**, **ideas**, or **feedback**: please open a new [discussion](https://github.com/TimD1/vcfdist/discussions).

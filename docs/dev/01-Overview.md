@@ -1,3 +1,5 @@
+> **User-facing wiki mirror.** Canonical version: [GitHub wiki](https://github.com/TimD1/vcfdist/wiki). Not for internal tracking.
+
 vcfdist evaluates the correctness of a set of phased variant calls (query VCF) relative to a set of phased ground truth variant calls (truth VCF) for a subset (regions BED) of the desired genome (reference FASTA). vcfdist was designed to evaluate human genomes, but should work on other monoploid and diploid species. It can evaluate variants of any type, including STRs (simple tandem repeats) and CNVs (copy number variants), but vcfdist classifies variants into SNPs (single nucleotide polymorphisms), INDELS (insertions and deletions), and SVs (structural variants) during evaluation. Evaluating variants larger than 10,000 bases is not recommended at the moment, as it will require large amounts of memory (over 50GB RAM). Below is a diagrammatic overview of vcfdist. Inputs are shown in red, internal steps in yellow, and optional steps in gray.
 
 <p align="center"><img src="https://github.com/TimD1/vcfdist/assets/13918078/85ecfbdb-0028-4bc8-aae0-3422849d1fd2" alt="overview"/></p>

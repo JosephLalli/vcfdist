@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "last_updated": "2026-05-28",
+  "last_updated": "2026-05-31",
   "baseline": {
     "tag": "v2.6.4",
     "docker_image": "timd1/vcfdist:v2.6.4",
@@ -13,7 +13,7 @@
     "secondary_metric": "wall_clock_speedup",
     "near_term_thread_target": 64,
     "stretch_thread_target": 256,
-    "eventual_speedup_target": 2.0,
+    "eventual_speedup_target": 32.0,
     "max_per_core_memory_increase_ratio": 3.0,
     "correctness_requirement": "no output, genotyping-error, switch-error, or flip-error regression"
   },
@@ -564,7 +564,7 @@
       "branch_note": "PARKED, NOT MERGED. Full design doc and complete measurements live on the branch: docs/pr-wavefront-parallel-plan.md and this file's slice_results entry there.",
       "benchmark": "HG00733_chr2_full",
       "date_measured": "2026-05-30",
-      "summary": "Intra-alignment score-wave parallelism for --exact-prec-recall giant superclusters: one persistent OpenMP team per alignment, barrier between score waves, giants deferred to a serial post-phase (shape B). Preceded by Slice 0 (name: pr_wavefront_parallel_slice0, on branch) which measured a 63.88x Amdahl ceiling at P=64 from a cells/critical-path model. NO-GO: the implementation anti-scales. Root cause is that the per-wave serial merge (omp single over claimed-cell buffers) is O(frontier width), the same order as the parallel compute, making the effective serial fraction ~98%. The Slice 0 ceiling ignored this merge cost and does not survive contact with the real implementation.",
+      "summary": "Unified thread pool scheduling per-score-wave jobs for --exact-prec-recall giant superclusters: one persistent OpenMP team per alignment, barrier between score waves, giants deferred to a serial post-phase (shape B). Preceded by Slice 0 (name: pr_wavefront_parallel_slice0, on branch) which estimated a 63.88x ceiling at P=64 from a cells/critical-path model. NO-GO: the implementation anti-scales because per-wave job dispatch and barriers produce thrashing and scheduling overhead that dominates the parallel compute; the serial per-wave join is the same order as the parallel work, so the effective serial fraction is ~98%. The Slice 0 ceiling ignored this and does not survive contact with the real implementation.",
       "correctness_gate": {
         "verdict": "PASS",
         "detail": "Full-chr2 --exact-prec-recall t=1/t=8/t=64 outputs are byte-identical. Demo regression PASS."
@@ -582,11 +582,8 @@
         },
         "isolation_note": "Windowed fixture (-t 64 outer fixed, VCFDIST_PR_INTRA_THREADS varied): team scales 2->8 (2.25x) then saturates 8->64; serial dense fill (team off) is ~5x faster than team's best."
       },
-      "disposition": "Disabled by default (src/dist.cpp: g_pr_intra_team=1). Opt-in via VCFDIST_PR_INTRA_THREADS>1 env var. Only --exact-prec-recall affected; default WFA-corridor path untouched. Recommendation: pursue outer-axis parallelism (phase pipelining, tail load balancing) for the giant long-pole instead."
+      "disposition": "Parked on the branch, not on master. Disabled by default there (src/dist.cpp: g_pr_intra_team=1), opt-in via VCFDIST_PR_INTRA_THREADS>1 env var. Only --exact-prec-recall affected; default WFA-corridor path untouched. The giant long-pole still needs outer-axis parallelism, but no specific design is approved or started."
     }
   ],
-  "open_measurement_gaps": [
-    "Record host CPU, NUMA topology, local binary build identifier, and storage notes for each benchmark host.",
-    "Repeat chr2 regression timing runs when using this fixture for final scaling claims; the current sweep records one run per requested thread count and shows useful scaling through 8 threads before saturating on the handful of dominant superclusters."
-  ]
+  "open_measurement_gaps": []
 }
