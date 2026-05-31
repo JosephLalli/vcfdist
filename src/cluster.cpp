@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <string>
 #include <thread>
 #include <vector>
@@ -961,6 +963,7 @@ void wf_swg_cluster(variantData * vcf, int ctg_idx,
     std::shared_ptr<ctgVariants> vars = vcf->variants[hap][ctg];
     if (!vars->n) return;
     inner_threads = std::max(1, inner_threads);
+    auto _pt0 = std::chrono::steady_clock::now();
     const std::string & ref_seq = vcf->ref->fasta.at(ctg);
 
     // mark variant boundary between clusters (hence n+1), 
@@ -1282,4 +1285,18 @@ void wf_swg_cluster(variantData * vcf, int ctg_idx,
     vars->clusters = prev_clusters;
     vars->left_reaches = left_reach;
     vars->right_reaches = right_reach;
+
+    {
+        double _ms = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - _pt0).count();
+        int _maxspan = 0, _maxnv = 0;
+        for (size_t i = 0; i + 1 < vars->clusters.size(); i++) {
+            int bi = vars->clusters[i], ei = vars->clusters[i+1];
+            int span = vars->poss[ei-1] + vars->rlens[ei-1] - vars->poss[bi];
+            if (span > _maxspan) { _maxspan = span; _maxnv = ei - bi; }
+        }
+        fprintf(stderr, "PROF3 CLUST ctg=%s hap=%d wall_ms=%.0f iters=%d "
+                "nclust=%d maxspan=%d maxnv=%d\n", ctg.data(), hap, _ms, iter,
+                int(vars->clusters.size()) - 1, _maxspan, _maxnv);
+    }
 }
