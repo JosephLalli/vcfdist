@@ -519,10 +519,41 @@ variantData::variantData(std::string vcf_fn,
         }
     }
 
-    if (bcf_hdr_nsamples(hdr) != 1) 
-        ERROR("Expected 1 sample but found %d in %s VCF '%s'", bcf_hdr_nsamples(hdr),
-                callset_strs[callset].data(), vcf_fn.data());
-    this->sample = hdr->samples[0];
+    // Determine which sample to use and find its index
+    int sample_idx = 0;
+    if (bcf_hdr_nsamples(hdr) != 1) {
+        // Multi-sample VCF
+        if (g.sample_name.empty()) {
+            ERROR("Multi-sample VCF provided (%d samples in %s VCF '%s'). "
+                  "Please specify which sample to run on using -s or --sample option",
+                  bcf_hdr_nsamples(hdr), callset_strs[callset].data(), vcf_fn.data());
+        }
+        // Find the sample index
+        sample_idx = -1;
+        for (int i = 0; i < bcf_hdr_nsamples(hdr); i++) {
+            if (std::string(hdr->samples[i]) == g.sample_name) {
+                sample_idx = i;
+                break;
+            }
+        }
+        if (sample_idx < 0) {
+            ERROR("Sample '%s' not found in %s VCF '%s'",
+                  g.sample_name.data(), callset_strs[callset].data(), vcf_fn.data());
+        }
+        this->sample = g.sample_name;
+    } else {
+        // Single-sample VCF
+        if (!g.sample_name.empty()) {
+            // Validate provided sample name matches the VCF
+            if (std::string(hdr->samples[0]) != g.sample_name) {
+                ERROR("Sample '%s' not found in %s VCF '%s' (only sample is '%s')",
+                      g.sample_name.data(), callset_strs[callset].data(), 
+                      vcf_fn.data(), hdr->samples[0]);
+            }
+        }
+        this->sample = hdr->samples[0];
+        sample_idx = 0;
+    }
 
     // verify that the filters we selected were in the VCF
     for (int fi = 0; fi < int(g.filters.size()); fi++) {
@@ -607,13 +638,17 @@ variantData::variantData(std::string vcf_fn,
             ngq = bcf_get_format_int32(hdr, rec, "GQ", &gq, &GQ_memsize);
             if (ngq == -2) {
                 ngq = bcf_get_format_float(hdr, rec, "GQ", &fgq, &GQ_memsize);
-                gq[0] = int(fgq[0]);
+                gq[0] = int(fgq[sample_idx]);
                 int_qual = false;
+            } else if (ngq > 0) {
+                gq[0] = gq[sample_idx];
             }
         }
         else {
             ngq = bcf_get_format_float(hdr, rec, "GQ", &fgq, &GQ_memsize);
-            gq[0] = int(fgq[0]);
+            if (ngq > 0) {
+                gq[0] = int(fgq[sample_idx]);
+            }
         }
         if ( ngq == -3 || ngq == -1 ) { // missing
             /* if (g.verbosity > 1 || !gq_missing_total) */
@@ -637,6 +672,21 @@ variantData::variantData(std::string vcf_fn,
         } else if (ngt <= 0) { // other error
             ERROR("Failed to read %s GT at %s:%lld", 
                     callset_strs[callset].data(), ctg.data(), (long long)rec->pos);
+        } else if (ngt > 0) {
+            // For multi-sample VCFs, ngt is total values (ploidy * nsamples)
+            // Calculate per-sample ploidy and extract data for our sample
+            int nsamples = bcf_hdr_nsamples(hdr);
+            if (ngt % nsamples != 0) {
+                ERROR("Invalid GT field at %s:%lld in %s VCF (values=%d not divisible by samples=%d)",
+                      ctg.data(), (long long)rec->pos, callset_strs[callset].data(), ngt, nsamples);
+            }
+            int ploidy_per_sample = ngt / nsamples;
+            int *sample_gt = gt + (sample_idx * ploidy_per_sample);
+            ngt = ploidy_per_sample;
+            // Copy to beginning of array for compatibility with existing code
+            for (int i = 0; i < ploidy_per_sample; i++) {
+                gt[i] = sample_gt[i];
+            }
         }
 
         // update ploidy info
@@ -725,7 +775,7 @@ variantData::variantData(std::string vcf_fn,
             ERROR("Failed to read %s PS at %s:%lld", 
                     callset_strs[callset].data(), ctg.data(), (long long)rec->pos);
         } else {
-            phase_set = PS[0];
+            phase_set = PS[sample_idx];
         }
 
 
